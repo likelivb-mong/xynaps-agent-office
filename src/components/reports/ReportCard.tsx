@@ -1,0 +1,585 @@
+import { useEffect, useState } from 'react'
+import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
+import { AGENTS } from '../../data/agents'
+import { AgentChatPanel } from './AgentChatPanel'
+import { ChatIcon, EyeIcon, ListIcon, ChevronLeftIcon, ChevronRightIcon, Spinner, RefreshIcon } from '../ui/Icon'
+import { AgentIcon } from '../ui/AgentIcon'
+
+interface Props {
+  report: AgentReport
+  onNewVersion: (agentId: string, chatHistory: ChatMessage[], newVersion: DetailVersion) => void
+  onChatSave: (agentId: string, chatHistory: ChatMessage[]) => void
+  projectContext: string
+  previousReports: AgentReport[]
+  isRunning?: boolean
+  queuePosition?: number
+  showRetryFromHere?: boolean
+  onRetryFromHere?: () => void
+}
+
+function extractHtml(detail: string): { html: string | null; plain: string } {
+  const markerRegex = /<\s*!?--\s*XYNAPS_HTML\s*-->/i
+  const match = markerRegex.exec(detail)
+  if (!match || match.index === undefined) return { html: null, plain: detail }
+  const markerStart = match.index
+  const markerEnd = markerStart + match[0].length
+  return { html: detail.slice(markerEnd).trim(), plain: detail.slice(0, markerStart).trim() }
+}
+
+function stripOperatingBudgetSectionText(input: string): string {
+  if (!input) return input
+  return input
+    .replace(
+      /(?:^|\n)\s*(?:#{1,6}\s*)?(?:0?7[\.\)\-:\s]*)?운영\s*예산[^\n]*\n[\s\S]*?(?=\n\s*(?:#{1,6}\s*)?(?:0?[1-9]|1[0-9])[\.\)\-:\s]+[^\n]*|\n\s*$)/gi,
+      '\n',
+    )
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function stripOperatingBudgetSectionHtml(input: string): string {
+  if (!input) return input
+  return input
+    .replace(/<h[1-6][^>]*>[^<]*운영\s*예산[^<]*<\/h[1-6]>[\s\S]*?(?=<h[1-6][^>]*>|$)/gi, '')
+    .replace(/<p[^>]*>\s*(?:0?7[\.\)\-:\s]*)?운영\s*예산[^<]*<\/p>[\s\S]*?(?=<h[1-6][^>]*>|$)/gi, '')
+    .trim()
+}
+
+export function ReportCard({ report, onNewVersion, onChatSave, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere }: Props) {
+  const [showDetail, setShowDetail] = useState(false)
+  const [showChat, setShowChat] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingSummary, setEditingSummary] = useState('')
+  const [editingDetail, setEditingDetail] = useState('')
+  const [useBottomChatLayout, setUseBottomChatLayout] = useState(() => (
+    typeof window !== 'undefined' ? window.innerWidth <= 1100 : false
+  ))
+  const agentDef = AGENTS.find(a => a.id === report.agentId)!
+
+  const versions = report.detailVersions ?? []
+  const activeVersion = versions.find(v => v.id === report.activeVersionId)
+  const displaySummary = stripOperatingBudgetSectionText(activeVersion?.summary ?? report.summary)
+  const displayDetail = stripOperatingBudgetSectionText(activeVersion?.detail ?? report.detail)
+  const activeVersionIdx = activeVersion ? versions.indexOf(activeVersion) : -1
+  const normalizedSummary = (displaySummary ?? '').replace(/\n{3,}/g, '\n\n').trim()
+
+  const { html: detailHtml, plain: detailPlain } = displayDetail
+    ? extractHtml(displayDetail)
+    : { html: null, plain: '' }
+  const editableDetail = (detailPlain || displayDetail || '').trim()
+
+  const chatCount = Math.floor((report.chatHistory?.length ?? 0) / 2)
+
+  useEffect(() => {
+    function syncLayout() {
+      setUseBottomChatLayout(window.innerWidth <= 1100)
+    }
+    syncLayout()
+    window.addEventListener('resize', syncLayout)
+    return () => window.removeEventListener('resize', syncLayout)
+  }, [])
+
+  useEffect(() => {
+    setEditingSummary(displaySummary ?? '')
+    setEditingDetail(editableDetail)
+    setIsEditing(false)
+  }, [displaySummary, editableDetail, report.agentId, report.activeVersionId])
+
+  function navigateVersion(dir: 1 | -1) {
+    if (versions.length === 0) return
+    let nextIdx = activeVersionIdx === -1
+      ? (dir === 1 ? 0 : versions.length - 1)
+      : Math.max(0, Math.min(versions.length - 1, activeVersionIdx + dir))
+    const targetId = versions[nextIdx]?.id
+    if (targetId) onNewVersion(report.agentId, report.chatHistory ?? [], { ...versions[nextIdx] })
+  }
+
+  function saveManualEdit() {
+    if (isRunning) return
+    const nextSummary = stripOperatingBudgetSectionText(editingSummary.trim())
+    const nextDetail = stripOperatingBudgetSectionText(editingDetail.trim())
+    const manualCount = (report.detailVersions?.filter(v => v.label.startsWith('수동 편집')).length ?? 0) + 1
+    const newVersion: DetailVersion = {
+      id: crypto.randomUUID(),
+      summary: nextSummary,
+      detail: nextDetail,
+      createdAt: new Date().toISOString(),
+      label: `수동 편집 ${manualCount}`,
+    }
+    onNewVersion(report.agentId, report.chatHistory ?? [], newVersion)
+    setIsEditing(false)
+  }
+
+  const iconBtn = (active: boolean): React.CSSProperties => ({
+    width: 30, height: 30, padding: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    borderRadius: 8, cursor: 'pointer',
+    border: `1px solid ${active ? 'var(--border-bright)' : 'var(--border)'}`,
+    background: active ? 'var(--bg-secondary)' : 'transparent',
+    color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+    flexShrink: 0,
+  })
+
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+      border: `1px solid ${isRunning ? 'var(--border-bright)' : 'var(--border)'}`,
+      borderRadius: 14,
+      transition: 'border-color 0.3s',
+      overflow: 'visible',
+      position: 'relative',
+      boxShadow: showChat && showDetail ? '0 14px 28px rgba(0,0,0,0.18)' : '0 6px 16px rgba(0,0,0,0.08)',
+    }}>
+      {/* ── Header ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '14px 16px',
+        borderBottom: report.status === 'done' ? '1px solid var(--border)' : 'none',
+        background: 'var(--bg-card)',
+        borderTopLeftRadius: 14,
+        borderTopRightRadius: 14,
+      }}>
+        {/* Avatar */}
+        <div style={{
+          width: 38, height: 38, flexShrink: 0,
+          background: 'var(--bg-secondary)',
+          border: `1px solid ${agentDef.color}44`,
+          borderRadius: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: agentDef.color,
+        }}>
+          <AgentIcon agentId={agentDef.id} width={17} height={17} />
+        </div>
+
+        {/* Name + role */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+            {agentDef.name}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 2 }}>
+            {agentDef.role}
+          </div>
+        </div>
+
+        {/* Status + actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {isRunning && (
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              fontSize: 11, color: 'var(--text-muted)',
+            }}>
+              <Spinner size={10} color="var(--accent-text)" />
+              <span style={{ fontSize: 10 }}>작성 중</span>
+            </span>
+          )}
+          {!isRunning && report.status === 'done' && (
+            <>
+              <button onClick={() => setShowDetail(false)} title="요약 보기" style={iconBtn(!showDetail)}>
+                <ListIcon width={13} height={13} />
+              </button>
+              <button onClick={() => setShowDetail(true)} title="상세 보기" style={iconBtn(showDetail)}>
+                <EyeIcon width={13} height={13} />
+              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => { if (!showDetail) return; setShowChat(v => !v) }}
+                  disabled={!showDetail}
+                  title={showDetail ? (showChat ? '채팅 닫기' : '전문가 채팅') : '상세 보기에서만 채팅 가능'}
+                  style={{
+                    ...iconBtn(showChat),
+                    opacity: showDetail ? 1 : 0.35,
+                    cursor: showDetail ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  <ChatIcon width={13} height={13} />
+                </button>
+                {chatCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -4, right: -4,
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: 'var(--accent)', color: 'var(--accent-fg)',
+                    fontSize: 8, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: '1.5px solid var(--bg-card)',
+                    pointerEvents: 'none',
+                  }}>
+                    {chatCount}
+                  </span>
+                )}
+              </div>
+
+              <span style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: 'var(--success)', flexShrink: 0,
+                marginLeft: 2,
+              }} title="완료" />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Body ── */}
+      {report.status === 'done' && (
+        <div style={{
+          padding: '16px',
+        }}>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+            {/* 버전 네비게이터 */}
+            {showDetail && versions.length > 1 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 10px',
+                background: 'var(--bg-secondary)',
+                borderRadius: 9,
+                border: '1px solid var(--border)',
+              }}>
+                <button
+                  onClick={() => navigateVersion(-1)}
+                  disabled={activeVersionIdx <= 0}
+                  title="이전 버전"
+                  style={{
+                    width: 22, height: 22, padding: 0, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 5, border: 'none',
+                    background: 'transparent', color: 'var(--text-muted)',
+                    cursor: activeVersionIdx <= 0 ? 'not-allowed' : 'pointer',
+                    opacity: activeVersionIdx <= 0 ? 0.3 : 1,
+                  }}
+                >
+                  <ChevronLeftIcon width={11} height={11} />
+                </button>
+                <span style={{
+                  flex: 1, textAlign: 'center',
+                  fontSize: 11, color: 'var(--text-secondary)', fontWeight: 500,
+                }}>
+                  {activeVersion?.label ?? '원본'}{' '}
+                  <span style={{ opacity: 0.45 }}>({activeVersionIdx + 1}/{versions.length})</span>
+                </span>
+                <button
+                  onClick={() => navigateVersion(1)}
+                  disabled={activeVersionIdx >= versions.length - 1}
+                  title="다음 버전"
+                  style={{
+                    width: 22, height: 22, padding: 0, flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    borderRadius: 5, border: 'none',
+                    background: 'transparent', color: 'var(--text-muted)',
+                    cursor: activeVersionIdx >= versions.length - 1 ? 'not-allowed' : 'pointer',
+                    opacity: activeVersionIdx >= versions.length - 1 ? 0.3 : 1,
+                  }}
+                >
+                  <ChevronRightIcon width={11} height={11} />
+                </button>
+              </div>
+            )}
+
+            {/* 내용 */}
+            <div style={{
+              background: showDetail ? 'var(--bg-secondary)' : 'transparent',
+              border: showDetail ? '1px solid var(--border)' : 'none',
+              borderRadius: showDetail ? 10 : 0,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                lineHeight: 1.72,
+                whiteSpace: 'pre-wrap',
+                padding: showDetail ? '14px 16px 16px' : 0,
+              }}>
+                {showDetail && (
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    color: 'var(--text-muted)',
+                    marginBottom: 8,
+                  }}>
+                    요약
+                  </div>
+                )}
+                {isEditing ? (
+                  <textarea
+                    value={editingSummary}
+                    onChange={e => setEditingSummary(e.target.value)}
+                    rows={6}
+                    style={{
+                      width: '100%',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      padding: '10px 11px',
+                      color: 'var(--text-primary)',
+                      fontSize: 12.5,
+                      lineHeight: 1.6,
+                      resize: 'vertical',
+                      fontFamily: 'inherit',
+                      outline: 'none',
+                    }}
+                  />
+                ) : normalizedSummary}
+              </div>
+
+              {showDetail && (
+                <div style={{
+                  borderTop: '1px solid var(--border)',
+                  padding: '14px 16px 16px',
+                  background: 'rgba(255,255,255,0.015)',
+                }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    color: 'var(--text-muted)',
+                    marginBottom: 8,
+                  }}>
+                    상세
+                  </div>
+                  {isEditing ? (
+                    <textarea
+                      value={editingDetail}
+                      onChange={e => setEditingDetail(e.target.value)}
+                      rows={14}
+                      style={{
+                        width: '100%',
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 8,
+                        padding: '10px 11px',
+                        color: 'var(--text-primary)',
+                        fontSize: 12.5,
+                        lineHeight: 1.65,
+                        resize: 'vertical',
+                        fontFamily: 'inherit',
+                        outline: 'none',
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    />
+                  ) : detailHtml ? (
+                    <div style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: stripOperatingBudgetSectionHtml(detailHtml) }} />
+                  ) : (
+                    <div style={{
+                      fontSize: 12.5,
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.72,
+                      whiteSpace: 'pre-wrap',
+                    }}>
+                      {detailPlain || displayDetail}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {showDetail && isEditing && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  onClick={() => {
+                    setIsEditing(false)
+                    setEditingSummary(displaySummary ?? '')
+                    setEditingDetail(editableDetail)
+                  }}
+                  style={{
+                    height: 30,
+                    padding: '0 12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  취소
+                </button>
+                <button
+                  onClick={saveManualEdit}
+                  style={{
+                    height: 30,
+                    padding: '0 12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--accent)',
+                    background: 'var(--accent)',
+                    color: 'var(--accent-fg)',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  저장
+                </button>
+              </div>
+            )}
+          </div>
+
+          {showDetail && showChat && (
+            <div style={{
+              position: useBottomChatLayout ? 'relative' : 'absolute',
+              top: useBottomChatLayout ? 'auto' : 68,
+              right: useBottomChatLayout ? 'auto' : -392,
+              width: useBottomChatLayout ? '100%' : 380,
+              zIndex: useBottomChatLayout ? 1 : 20,
+              marginTop: useBottomChatLayout ? 12 : 0,
+            }}>
+              <AgentChatPanel
+                report={report}
+                projectContext={projectContext}
+                previousReports={previousReports}
+                onNewVersion={(chatHistory, newVersion) => {
+                  onNewVersion(report.agentId, chatHistory, newVersion)
+                  setShowChat(false)
+                }}
+                onChatSave={(chatHistory) => onChatSave(report.agentId, chatHistory)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {report.status === 'pending' && !isRunning && (
+        <div style={{
+          padding: '12px 14px',
+          fontSize: 12,
+          color: 'var(--text-muted)',
+          opacity: 0.72,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <span style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: 'rgba(148,163,184,0.7)',
+            boxShadow: '0 0 0 3px rgba(148,163,184,0.08)',
+          }} />
+          {queuePosition ? `대기열 ${queuePosition}번` : '대기 중'}
+        </div>
+      )}
+
+      {!isRunning && showRetryFromHere && onRetryFromHere && (
+        <div style={{
+          padding: '0 14px 14px',
+        }}>
+          <button
+            onClick={onRetryFromHere}
+            style={{
+              width: '100%',
+              border: '1px solid rgba(251,191,36,0.34)',
+              background: 'rgba(251,191,36,0.1)',
+              color: '#fcd34d',
+              borderRadius: 10,
+              padding: '10px 12px',
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+            }}
+          >
+            <RefreshIcon width={13} height={13} />
+            이 에이전트부터 재실행
+          </button>
+        </div>
+      )}
+
+      {isRunning && (
+        <div style={{
+          position: 'relative',
+          overflow: 'hidden',
+          borderTop: '1px solid var(--border)',
+          padding: '14px 16px 16px',
+          background: 'linear-gradient(180deg, rgba(111,255,163,0.05), rgba(111,255,163,0.015) 60%, transparent 100%)',
+        }}>
+          <div
+            className="project-working-scan"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'linear-gradient(180deg, transparent 0%, rgba(201,255,84,0.12) 45%, transparent 100%)',
+              pointerEvents: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="project-working-led" style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: '#c9ff54',
+                boxShadow: '0 0 12px rgba(201,255,84,0.7)',
+              }} />
+              <span style={{ fontSize: 12, fontWeight: 800, color: '#efffb8', letterSpacing: '0.06em' }}>
+                AI WORKING MODE
+              </span>
+            </div>
+            <span style={{ fontSize: 11, color: 'rgba(239,255,184,0.82)', fontWeight: 700 }}>
+              LIVE
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 12, position: 'relative' }}>
+            <div style={{
+              border: '1px solid rgba(201,255,84,0.16)',
+              borderRadius: 12,
+              background: 'rgba(255,255,255,0.02)',
+              padding: '12px 12px 10px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>현재 처리 중</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
+                기획 문맥 정리 및 보고서 초안 생성
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[
+                  '프로젝트 맥락 로드',
+                  '브리핑 컨텍스트 병합',
+                  '에이전트 역할 프롬프트 생성',
+                  '초안 요약 및 상세 보고서 작성',
+                ].map((line, index) => (
+                  <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: index < 3 ? '#dfe8f8' : 'var(--text-muted)' }}>
+                    <span style={{
+                      width: 5,
+                      height: 5,
+                      borderRadius: '50%',
+                      background: index < 3 ? '#c9ff54' : 'rgba(148,163,184,0.5)',
+                    }} />
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{
+              border: '1px solid rgba(120,148,255,0.14)',
+              borderRadius: 12,
+              background: 'rgba(255,255,255,0.018)',
+              padding: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>실행 상태</div>
+              <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 700 }}>모델 응답 대기 및 초안 조합</div>
+              <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                <div
+                  className="project-working-progress"
+                  style={{
+                    height: '100%',
+                    width: '58%',
+                    borderRadius: 999,
+                    background: 'linear-gradient(90deg, #c9ff54 0%, #8ce8ff 100%)',
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                에이전트 역할에 맞춰 구조화된 기획안 초안을 생성하고 있습니다.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

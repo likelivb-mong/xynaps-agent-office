@@ -1,0 +1,1994 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type { GameFlowSection, GameFlowSheet, GameStep, SkillFile, UserFlowConfig, UserFlowScreen, UserJourneyNode } from '../types'
+import { UserJourneyEditor } from './UserJourneyEditor'
+import { UploadIcon } from './ui/Icon'
+import { STUDIO_TILE, STUDIO_COLS, STUDIO_ROWS, STUDIO_WIDTH, STUDIO_HEIGHT } from '../constants/studioGrid'
+
+interface StepWithContext extends GameStep {
+  sectionTitle: string
+  sectionId: string
+  globalIndex: number
+  displayIndex: string
+  memberStepIds: string[]
+}
+
+interface Props {
+  sheet: GameFlowSheet
+  floorPlanImage?: SkillFile | null
+  onChange: (sheet: GameFlowSheet) => void
+  mode?: 'path' | 'user'
+  projectName?: string
+}
+
+const SECTION_COLORS = ['#9b6dff', '#4da6ff', '#00d4aa', '#ff7043', '#ff6b9d']
+const DEFAULT_SECTION_MAP_BOXES = [
+  { x: 2, y: 3, w: 12, h: 11 },
+  { x: 15, y: 2, w: 13, h: 12 },
+  { x: 29, y: 3, w: 12, h: 11 },
+  { x: 2, y: 18, w: 18, h: 13 },
+  { x: 21, y: 18, w: 20, h: 13 },
+]
+const SECTION_CELL_PCT_W = 100 / STUDIO_COLS
+const SECTION_CELL_PCT_H = 100 / STUDIO_ROWS
+
+function getSectionAlphaLabel(index: number): string {
+  let n = index + 1
+  let label = ''
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    label = String.fromCharCode(65 + rem) + label
+    n = Math.floor((n - 1) / 26)
+  }
+  return label
+}
+
+function stripSectionPrefix(title: string): string {
+  return title.replace(/^\s*[A-Z]{1,3}\s*[.)\-:]\s*/i, '').trim()
+}
+
+function getSectionDisplayTitle(index: number, title: string): string {
+  const base = stripSectionPrefix(title) || title.trim()
+  return `${getSectionAlphaLabel(index)}. ${base}`
+}
+
+function getPinColor(step: GameStep): string {
+  if (step.dev) return '#4da6ff'
+  if (step.key) return '#00d4aa'
+  if (step.xkit) return '#f59e0b'
+  if (step.auto) return '#6b7280'
+  return '#9b6dff'
+}
+
+function getPinBg(step: GameStep): string {
+  if (step.dev) return '#1e3a5f'
+  if (step.key) return '#1a3a2a'
+  if (step.xkit) return '#3a2a00'
+  if (step.auto) return '#1a1a1a'
+  return '#2a1a4a'
+}
+
+function getStepGroupId(step: GameStep): string {
+  return step.stepGroup ?? step.id
+}
+
+function getSectionMapBox(section: GameFlowSection, index: number) {
+  return section.mapBox ?? DEFAULT_SECTION_MAP_BOXES[index % DEFAULT_SECTION_MAP_BOXES.length]
+}
+
+function cellKey(x: number, y: number) {
+  return `${x},${y}`
+}
+
+function parseCellKey(key: string) {
+  const [xs, ys] = key.split(',')
+  return { x: Number(xs), y: Number(ys) }
+}
+
+function getSectionCellSet(section: GameFlowSection, index: number): Set<string> {
+  if (section.mapCells && section.mapCells.length > 0) {
+    return new Set(section.mapCells)
+  }
+  const box = getSectionMapBox(section, index)
+  const set = new Set<string>()
+  for (let x = box.x; x < box.x + box.w; x += 1) {
+    for (let y = box.y; y < box.y + box.h; y += 1) {
+      set.add(cellKey(x, y))
+    }
+  }
+  return set
+}
+
+function getBoxFromCells(cells: Set<string>, fallback: { x: number; y: number; w: number; h: number }) {
+  if (cells.size === 0) return fallback
+  let minX = STUDIO_COLS
+  let minY = STUDIO_ROWS
+  let maxX = 0
+  let maxY = 0
+  cells.forEach(k => {
+    const { x, y } = parseCellKey(k)
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
+  })
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 }
+}
+
+function clampPinToSectionCells(
+  pinX: number | undefined,
+  pinY: number | undefined,
+  cells: Set<string>,
+  fallbackBox: { x: number; y: number; w: number; h: number }
+) {
+  if (pinX === undefined || pinY === undefined) return { pinX, pinY }
+  if (cells.size === 0) {
+    const minX = (fallbackBox.x / STUDIO_COLS) * 100
+    const maxX = ((fallbackBox.x + fallbackBox.w) / STUDIO_COLS) * 100
+    const minY = (fallbackBox.y / STUDIO_ROWS) * 100
+    const maxY = ((fallbackBox.y + fallbackBox.h) / STUDIO_ROWS) * 100
+    return {
+      pinX: Math.max(minX, Math.min(maxX, pinX)),
+      pinY: Math.max(minY, Math.min(maxY, pinY)),
+    }
+  }
+  const col = Math.max(0, Math.min(STUDIO_COLS - 1, Math.floor((pinX / 100) * STUDIO_COLS)))
+  const row = Math.max(0, Math.min(STUDIO_ROWS - 1, Math.floor((pinY / 100) * STUDIO_ROWS)))
+
+  let best = { x: col, y: row }
+  let bestDist = Number.MAX_SAFE_INTEGER
+  cells.forEach(k => {
+    const p = parseCellKey(k)
+    const d = Math.abs(p.x - col) + Math.abs(p.y - row)
+    if (d < bestDist) {
+      bestDist = d
+      best = p
+    }
+  })
+  return {
+    pinX: ((best.x + 0.5) / STUDIO_COLS) * 100,
+    pinY: ((best.y + 0.5) / STUDIO_ROWS) * 100,
+  }
+}
+
+function buildSectionOutlineSegments(cells: Set<string>) {
+  const segments: Array<{ x1: number; y1: number; x2: number; y2: number }> = []
+  cells.forEach(k => {
+    const { x, y } = parseCellKey(k)
+    if (!cells.has(cellKey(x, y - 1))) segments.push({ x1: x, y1: y, x2: x + 1, y2: y }) // top
+    if (!cells.has(cellKey(x + 1, y))) segments.push({ x1: x + 1, y1: y, x2: x + 1, y2: y + 1 }) // right
+    if (!cells.has(cellKey(x, y + 1))) segments.push({ x1: x, y1: y + 1, x2: x + 1, y2: y + 1 }) // bottom
+    if (!cells.has(cellKey(x - 1, y))) segments.push({ x1: x, y1: y, x2: x, y2: y + 1 }) // left
+  })
+  return segments
+}
+
+function getSectionLabelAnchor(
+  cells: Set<string>,
+  fallbackBox: { x: number; y: number; w: number; h: number }
+) {
+  if (cells.size === 0) return { x: fallbackBox.x, y: fallbackBox.y }
+  let bestX = fallbackBox.x
+  let bestY = fallbackBox.y
+  let initialized = false
+  cells.forEach(key => {
+    const { x, y } = parseCellKey(key)
+    if (!initialized) {
+      bestX = x
+      bestY = y
+      initialized = true
+      return
+    }
+    if (y < bestY || (y === bestY && x < bestX)) {
+      bestX = x
+      bestY = y
+    }
+  })
+  return { x: bestX, y: bestY }
+}
+
+function getSectionCenter(cells: Set<string>) {
+  if (cells.size === 0) return { x: 0, y: 0 }
+  let sx = 0
+  let sy = 0
+  cells.forEach(k => {
+    const { x, y } = parseCellKey(k)
+    sx += x + 0.5
+    sy += y + 0.5
+  })
+  return { x: sx / cells.size, y: sy / cells.size }
+}
+
+type ArrowDirection = 'east' | 'west' | 'south' | 'north'
+
+function getArrowDirection(from: { x: number; y: number }, to: { x: number; y: number }): ArrowDirection {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'east' : 'west'
+  return dy >= 0 ? 'south' : 'north'
+}
+
+function getArrowGlyph(dir: ArrowDirection) {
+  if (dir === 'east') return '→'
+  if (dir === 'west') return '←'
+  if (dir === 'south') return '↓'
+  return '↑'
+}
+
+function scaleSectionCells(
+  sourceCells: string[],
+  fromBox: { x: number; y: number; w: number; h: number },
+  toBox: { x: number; y: number; w: number; h: number }
+) {
+  const next = new Set<string>()
+  const fromW = Math.max(1, fromBox.w)
+  const fromH = Math.max(1, fromBox.h)
+  const toW = Math.max(1, toBox.w)
+  const toH = Math.max(1, toBox.h)
+
+  sourceCells.forEach(k => {
+    const { x, y } = parseCellKey(k)
+    const xStartRatio = (x - fromBox.x) / fromW
+    const xEndRatio = (x + 1 - fromBox.x) / fromW
+    const yStartRatio = (y - fromBox.y) / fromH
+    const yEndRatio = (y + 1 - fromBox.y) / fromH
+
+    const x0 = Math.floor(toBox.x + xStartRatio * toW)
+    const x1 = Math.ceil(toBox.x + xEndRatio * toW) - 1
+    const y0 = Math.floor(toBox.y + yStartRatio * toH)
+    const y1 = Math.ceil(toBox.y + yEndRatio * toH) - 1
+
+    const clampedX0 = Math.max(toBox.x, Math.min(toBox.x + toW - 1, x0))
+    const clampedX1 = Math.max(clampedX0, Math.min(toBox.x + toW - 1, x1))
+    const clampedY0 = Math.max(toBox.y, Math.min(toBox.y + toH - 1, y0))
+    const clampedY1 = Math.max(clampedY0, Math.min(toBox.y + toH - 1, y1))
+
+    for (let tx = clampedX0; tx <= clampedX1; tx += 1) {
+      for (let ty = clampedY0; ty <= clampedY1; ty += 1) {
+        next.add(cellKey(tx, ty))
+      }
+    }
+  })
+
+  return Array.from(next)
+}
+
+function buildUserFlow(sheet: GameFlowSheet, projectName?: string): UserFlowConfig {
+  return {
+    title: sheet.userFlow?.title?.trim() || projectName?.trim() || '게임플로우 프로젝트',
+    description: sheet.userFlow?.description?.trim() || '게임 플로우 스텝을 유저 여정과 연결해 정리하세요.',
+    branchTitles: sheet.userFlow?.branchTitles ?? {},
+    stepTitles: sheet.userFlow?.stepTitles ?? {},
+    stepLinks: sheet.userFlow?.stepLinks ?? {},
+    tableSyncKey: sheet.userFlow?.tableSyncKey,
+    graph: sheet.userFlow?.graph,
+    theme: sheet.userFlow?.theme ?? 'dark',
+    screens: (sheet.userFlow?.screens ?? []).map(screen => ({
+      ...screen,
+      screenKind: screen.screenKind ?? 'manual',
+      statusMode: screen.statusMode ?? 'default',
+    })),
+  }
+}
+
+function syncXkitScreens(userFlow: UserFlowConfig, allSteps: StepWithContext[]): UserFlowConfig {
+  const graphNodes = userFlow.graph?.nodes ?? []
+  const stepById = new Map(allSteps.map(step => [step.id, step]))
+  const oldScreens = userFlow.screens ?? []
+  const oldScreenById = new Map(oldScreens.map(screen => [screen.id, screen]))
+  const manualScreens = oldScreens.filter(screen => !screen.sourceNodeId)
+  const oldBaseBySource = new Map(oldScreens.filter(screen => screen.screenKind === 'xkit' && screen.sourceNodeId).map(screen => [screen.sourceNodeId!, screen]))
+
+  const xkitNodes = graphNodes
+    .filter((node): node is UserJourneyNode => node.type === 'xkit')
+    .slice()
+    .sort((a, b) => {
+      const sa = a.sourceStepId ? stepById.get(a.sourceStepId)?.globalIndex ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
+      const sb = b.sourceStepId ? stepById.get(b.sourceStepId)?.globalIndex ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
+      if (sa !== sb) return sa - sb
+      if (a.y !== b.y) return a.y - b.y
+      return a.x - b.x
+    })
+
+  const generatedScreens: UserFlowScreen[] = []
+  xkitNodes.forEach((node, index) => {
+    const order = index + 1
+    const baseId = oldBaseBySource.get(node.id)?.id ?? crypto.randomUUID()
+    const oldBase = oldBaseBySource.get(node.id)
+    const oldAnswerChain: UserFlowScreen[] = []
+    if (oldBase) {
+      const visited = new Set<string>()
+      let nextId = oldBase.nextScreenId
+      while (nextId && !visited.has(nextId)) {
+        visited.add(nextId)
+        const next = oldScreenById.get(nextId)
+        if (!next || next.screenKind !== 'xkit-answer' || next.sourceNodeId !== node.id) break
+        oldAnswerChain.push(next)
+        nextId = next.nextScreenId
+      }
+    }
+    const statusMode = oldBase?.statusMode ?? 'default'
+    const answerChainCount = statusMode === 'answer'
+      ? Math.max(1, Math.min(9, oldBase?.answerChainCount ?? Math.max(1, oldAnswerChain.length)))
+      : 0
+    const answerText = oldBase?.answerText ?? ''
+    const baseTitle = `X${order}-${node.title}`
+    const baseScreen: UserFlowScreen = {
+      id: baseId,
+      title: baseTitle,
+      caption: oldBase?.caption ?? '',
+      linkedStepId: node.sourceStepId ?? oldBase?.linkedStepId,
+      imageDataUrl: oldBase?.imageDataUrl,
+      imageName: oldBase?.imageName,
+      sourceNodeId: node.id,
+      screenKind: 'xkit',
+      xkitSubtype: oldBase?.xkitSubtype ?? node.fileType ?? 'Clues',
+      statusMode,
+      answerChainCount,
+      answerText,
+      nextScreenId: undefined,
+    }
+
+    if (statusMode === 'answer') {
+      generatedScreens.push(baseScreen)
+      let previous = baseScreen
+      for (let i = 0; i < answerChainCount; i += 1) {
+        const suffix = String.fromCharCode(65 + i)
+        const oldAnswer = oldAnswerChain[i]
+        const answerId = oldAnswer?.id ?? crypto.randomUUID()
+        previous.nextScreenId = answerId
+        const answerScreen: UserFlowScreen = {
+          id: answerId,
+          title: `X${order}${suffix}-${node.title}`,
+          caption: oldAnswer?.caption ?? '',
+          linkedStepId: node.sourceStepId ?? oldAnswer?.linkedStepId,
+          imageDataUrl: oldAnswer?.imageDataUrl,
+          imageName: oldAnswer?.imageName,
+          sourceNodeId: node.id,
+          screenKind: 'xkit-answer',
+          xkitSubtype: oldAnswer?.xkitSubtype ?? baseScreen.xkitSubtype ?? node.fileType ?? 'Clues',
+          statusMode: 'default',
+          nextScreenId: undefined,
+        }
+        generatedScreens.push(answerScreen)
+        previous = answerScreen
+      }
+    } else {
+      generatedScreens.push(baseScreen)
+    }
+  })
+
+  const nextScreens = [...generatedScreens, ...manualScreens]
+  if (JSON.stringify(nextScreens) === JSON.stringify(userFlow.screens ?? [])) return userFlow
+  return { ...userFlow, screens: nextScreens }
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+export function GameFlowMap({ sheet, floorPlanImage, onChange, mode = 'path', projectName }: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [hoverPin, setHoverPin] = useState<string | null>(null)
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
+  const [sectionCellEditMode, setSectionCellEditMode] = useState<'add' | 'remove' | null>(null)
+  const [mapHeight, setMapHeight] = useState<number | null>(null)
+  const [hoverPinRect, setHoverPinRect] = useState<{ x: number; y: number; step: StepWithContext; color: string } | null>(null)
+  const mapRef = useRef<HTMLDivElement>(null)
+  const dragOffset = useRef({ x: 0, y: 0 })
+  const sectionPaintRef = useRef<{ active: boolean; lastCell: string | null }>({ active: false, lastCell: null })
+  const skipNextMapClickRef = useRef(false)
+  const resizeRef = useRef<{ active: boolean; startY: number; startH: number; corner: string }>({ active: false, startY: 0, startH: 0, corner: '' })
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent, corner: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const currentH = mapRef.current?.getBoundingClientRect().height ?? 480
+    resizeRef.current = { active: true, startY: e.clientY, startH: currentH, corner }
+    const onMove = (ev: MouseEvent) => {
+      if (!resizeRef.current.active) return
+      const dy = ev.clientY - resizeRef.current.startY
+      const newH = Math.max(200, resizeRef.current.startH + dy)
+      setMapHeight(newH)
+    }
+    const onUp = () => {
+      resizeRef.current.active = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
+
+  const allSteps: StepWithContext[] = []
+  let gIdx = 0
+  for (const section of sheet.sections) {
+    let sectionMainIndex = 0
+    for (let i = 0; i < section.steps.length;) {
+      const first = section.steps[i]
+      const groupId = getStepGroupId(first)
+      let j = i + 1
+      while (j < section.steps.length && getStepGroupId(section.steps[j]) === groupId) j += 1
+      const groupSteps = section.steps.slice(i, j)
+      const pinSource = groupSteps.find(step => step.pinX !== undefined && step.pinY !== undefined) ?? groupSteps[0]
+
+      sectionMainIndex += 1
+      gIdx += 1
+      allSteps.push({
+        ...first,
+        xkit: groupSteps.some(step => step.xkit),
+        key: groupSteps.some(step => step.key),
+        dev: groupSteps.some(step => step.dev),
+        pinX: pinSource.pinX,
+        pinY: pinSource.pinY,
+        sectionTitle: section.title,
+        sectionId: section.id,
+        globalIndex: gIdx,
+        displayIndex: String(sectionMainIndex),
+        memberStepIds: groupSteps.map(step => step.id),
+      })
+      i = j
+    }
+  }
+
+  const placedSteps = allSteps.filter(s => s.pinX !== undefined && s.pinY !== undefined)
+  const unplacedSteps = allSteps.filter(s => s.pinX === undefined || s.pinY === undefined)
+  const sectionColorMap: Record<string, string> = {}
+  sheet.sections.forEach((sec, i) => {
+    sectionColorMap[sec.id] = SECTION_COLORS[i % SECTION_COLORS.length]
+  })
+
+  const userFlow = buildUserFlow(sheet, projectName)
+  const isUserMode = mode === 'user'
+
+  useEffect(() => {
+    if (!selectedSectionId) return
+    if (sheet.sections.some(sec => sec.id === selectedSectionId)) return
+    setSelectedSectionId(null)
+  }, [selectedSectionId, sheet.sections])
+
+  useEffect(() => {
+    if (!isUserMode) return
+    const synced = syncXkitScreens(userFlow, allSteps)
+    if (synced !== userFlow) updateSheet({ ...sheet, userFlow: synced })
+  }, [allSteps, isUserMode, sheet, userFlow])
+
+  function updateSheet(next: GameFlowSheet) {
+    onChange(next)
+  }
+
+  function updatePin(stepId: string, pinX?: number, pinY?: number) {
+    const target = allSteps.find(step => step.id === stepId)
+    const targetIds = new Set(target?.memberStepIds ?? [stepId])
+    let bounded = { pinX, pinY }
+    if (target && pinX !== undefined && pinY !== undefined) {
+      const sectionIndex = sheet.sections.findIndex(sec => sec.id === target.sectionId)
+      if (sectionIndex >= 0) {
+        const sec = sheet.sections[sectionIndex]
+        const cells = getSectionCellSet(sec, sectionIndex)
+        const box = getSectionMapBox(sec, sectionIndex)
+        bounded = clampPinToSectionCells(pinX, pinY, cells, box)
+      }
+    }
+
+    updateSheet({
+      ...sheet,
+      sections: sheet.sections.map(sec => ({
+        ...sec,
+        steps: sec.steps.map(step => (targetIds.has(step.id) ? { ...step, pinX: bounded.pinX, pinY: bounded.pinY } : step)),
+      })),
+    })
+  }
+
+  function updateSectionMapBox(
+    sectionId: string,
+    nextBox: { x: number; y: number; w: number; h: number },
+    options?: {
+      mode?: 'move' | 'resize'
+      startBox?: { x: number; y: number; w: number; h: number }
+      initialPins?: Map<string, { x?: number; y?: number }>
+    }
+  ) {
+    updateSheet({
+      ...sheet,
+      sections: sheet.sections.map((sec, secIndex) => {
+        if (sec.id !== sectionId) return sec
+
+        const dxPct = options?.mode === 'move' && options.startBox
+          ? ((nextBox.x - options.startBox.x) / STUDIO_COLS) * 100
+          : 0
+        const dyPct = options?.mode === 'move' && options.startBox
+          ? ((nextBox.y - options.startBox.y) / STUDIO_ROWS) * 100
+          : 0
+
+        let nextMapCells = sec.mapCells
+        if (sec.mapCells && sec.mapCells.length > 0 && options?.startBox) {
+          if (options.mode === 'move') {
+            const dxCell = nextBox.x - options.startBox.x
+            const dyCell = nextBox.y - options.startBox.y
+            nextMapCells = sec.mapCells.map(k => {
+              const p = parseCellKey(k)
+              const nx = Math.max(0, Math.min(STUDIO_COLS - 1, p.x + dxCell))
+              const ny = Math.max(0, Math.min(STUDIO_ROWS - 1, p.y + dyCell))
+              return cellKey(nx, ny)
+            })
+          } else if (options.mode === 'resize') {
+            nextMapCells = scaleSectionCells(sec.mapCells, options.startBox, nextBox)
+          }
+        }
+        const nextCells = nextMapCells && nextMapCells.length > 0
+          ? new Set(nextMapCells)
+          : getSectionCellSet({ ...sec, mapBox: nextBox }, secIndex)
+
+        return {
+          ...sec,
+          mapBox: nextBox,
+          mapCells: nextMapCells,
+          steps: sec.steps.map(step => {
+            let nextPinX = step.pinX
+            let nextPinY = step.pinY
+
+            if (options?.mode === 'move' && options.initialPins) {
+              const initial = options.initialPins.get(step.id)
+              if (initial) {
+                nextPinX = initial.x === undefined ? undefined : initial.x + dxPct
+                nextPinY = initial.y === undefined ? undefined : initial.y + dyPct
+              }
+            }
+            const clamped = clampPinToSectionCells(nextPinX, nextPinY, nextCells, nextBox)
+            return { ...step, pinX: clamped.pinX, pinY: clamped.pinY }
+          }),
+        }
+      }),
+    })
+  }
+
+  function editSectionCell(sectionId: string, col: number, row: number, modeType: 'add' | 'remove') {
+    updateSheet({
+      ...sheet,
+      sections: sheet.sections.map((sec, secIndex) => {
+        if (sec.id !== sectionId) return sec
+        const fallback = getSectionMapBox(sec, secIndex)
+        const cells = getSectionCellSet(sec, secIndex)
+        const key = cellKey(col, row)
+        if (modeType === 'add') cells.add(key)
+        if (modeType === 'remove' && cells.size > 1) cells.delete(key)
+        const box = getBoxFromCells(cells, fallback)
+        return {
+          ...sec,
+          mapBox: box,
+          mapCells: Array.from(cells),
+          steps: sec.steps.map(step => {
+            const clamped = clampPinToSectionCells(step.pinX, step.pinY, cells, box)
+            return { ...step, pinX: clamped.pinX, pinY: clamped.pinY }
+          }),
+        }
+      }),
+    })
+  }
+
+  function updateUserFlow(next: UserFlowConfig) {
+    updateSheet({
+      ...sheet,
+      userFlow: next,
+    })
+  }
+
+  function updateUserScreen(screenId: string, patch: Partial<UserFlowScreen>) {
+    updateUserFlow({
+      ...userFlow,
+      screens: userFlow.screens.map(screen => (screen.id === screenId ? { ...screen, ...patch } : screen)),
+    })
+  }
+
+  async function handleUserScreenUpload(screenId: string, file: File | null) {
+    if (!file) return
+    const imageDataUrl = await readFileAsDataUrl(file)
+    updateUserScreen(screenId, { imageDataUrl, imageName: file.name })
+  }
+
+  function handleMapClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (draggingId || mode !== 'path') return
+    if (skipNextMapClickRef.current) {
+      skipNextMapClickRef.current = false
+      return
+    }
+    setSelectedSectionId(null)
+    if (!selectedId || !mapRef.current) return
+    const rect = mapRef.current.getBoundingClientRect()
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 1000) / 10
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 1000) / 10
+    updatePin(selectedId, x, y)
+    setSelectedId(null)
+  }
+
+  const handlePinMouseDown = useCallback((e: React.MouseEvent, stepId: string, pinX: number, pinY: number) => {
+    e.stopPropagation()
+    const step = allSteps.find(item => item.id === stepId)
+    if (!step || selectedSectionId !== step.sectionId) return
+    if (!mapRef.current) return
+    skipNextMapClickRef.current = true
+    const rect = mapRef.current.getBoundingClientRect()
+    const currentX = (pinX / 100) * rect.width + rect.left
+    const currentY = (pinY / 100) * rect.height + rect.top
+    dragOffset.current = { x: e.clientX - currentX, y: e.clientY - currentY }
+    setDraggingId(stepId)
+    setSelectedId(null)
+
+    function onMove(me: MouseEvent) {
+      if (!mapRef.current) return
+      const r = mapRef.current.getBoundingClientRect()
+      const nx = Math.max(0, Math.min(100, ((me.clientX - dragOffset.current.x - r.left) / r.width) * 100))
+      const ny = Math.max(0, Math.min(100, ((me.clientY - dragOffset.current.y - r.top) / r.height) * 100))
+      updatePin(stepId, Math.round(nx * 10) / 10, Math.round(ny * 10) / 10)
+    }
+
+    function onUp() {
+      setDraggingId(null)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [allSteps, selectedSectionId])
+
+  function handlePinDblClick(e: React.MouseEvent, stepId: string) {
+    e.stopPropagation()
+    updatePin(stepId, undefined, undefined)
+  }
+
+  function applySectionCellEditFromPointer(clientX: number, clientY: number): boolean {
+    if (!sectionCellEditMode || !selectedSectionId || selectedId || !mapRef.current) return false
+    const rect = mapRef.current.getBoundingClientRect()
+    const col = Math.max(0, Math.min(STUDIO_COLS - 1, Math.floor(((clientX - rect.left) / rect.width) * STUDIO_COLS)))
+    const row = Math.max(0, Math.min(STUDIO_ROWS - 1, Math.floor(((clientY - rect.top) / rect.height) * STUDIO_ROWS)))
+    const key = cellKey(col, row)
+    if (sectionPaintRef.current.active && sectionPaintRef.current.lastCell === key) return true
+    sectionPaintRef.current.lastCell = key
+    editSectionCell(selectedSectionId, col, row, sectionCellEditMode)
+    return true
+  }
+
+  function handleMapMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (mode !== 'path') return
+    const painted = applySectionCellEditFromPointer(e.clientX, e.clientY)
+    if (!painted) return
+    sectionPaintRef.current.active = true
+    function onUp() {
+      sectionPaintRef.current.active = false
+      sectionPaintRef.current.lastCell = null
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mouseup', onUp)
+  }
+
+  function handleMapMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (!sectionPaintRef.current.active || mode !== 'path') return
+    applySectionCellEditFromPointer(e.clientX, e.clientY)
+  }
+
+  function startSectionBoxDrag(
+    e: React.MouseEvent,
+    section: GameFlowSection,
+    sectionIndex: number,
+    modeType: 'move' | 'resize',
+    resizeDir: 'nw' | 'ne' | 'sw' | 'se' = 'se'
+  ) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!mapRef.current || mode !== 'path' || sectionCellEditMode) return
+    if (selectedSectionId !== section.id) return
+    skipNextMapClickRef.current = true
+
+    const rect = mapRef.current.getBoundingClientRect()
+    const box = getSectionMapBox(section, sectionIndex)
+    const initialPins = new Map(
+      section.steps.map(step => [step.id, { x: step.pinX, y: step.pinY }])
+    )
+    const startCol = ((e.clientX - rect.left) / rect.width) * STUDIO_COLS
+    const startRow = ((e.clientY - rect.top) / rect.height) * STUDIO_ROWS
+    const start = { ...box }
+
+    function onMove(me: MouseEvent) {
+      if (!mapRef.current) return
+      const r = mapRef.current.getBoundingClientRect()
+      const currentCol = ((me.clientX - r.left) / r.width) * STUDIO_COLS
+      const currentRow = ((me.clientY - r.top) / r.height) * STUDIO_ROWS
+      const dc = Math.round(currentCol - startCol)
+      const dr = Math.round(currentRow - startRow)
+
+      if (modeType === 'move') {
+        const nx = Math.max(0, Math.min(STUDIO_COLS - start.w, start.x + dc))
+        const ny = Math.max(0, Math.min(STUDIO_ROWS - start.h, start.y + dr))
+        updateSectionMapBox(
+          section.id,
+          { ...start, x: nx, y: ny },
+          { mode: 'move', startBox: start, initialPins }
+        )
+      } else {
+        let nx = start.x
+        let ny = start.y
+        let nw = start.w
+        let nh = start.h
+
+        if (resizeDir === 'se') {
+          nw = Math.max(2, Math.min(STUDIO_COLS - start.x, start.w + dc))
+          nh = Math.max(2, Math.min(STUDIO_ROWS - start.y, start.h + dr))
+        } else if (resizeDir === 'sw') {
+          nx = Math.max(0, Math.min(start.x + start.w - 2, start.x + dc))
+          nw = start.w + (start.x - nx)
+          nh = Math.max(2, Math.min(STUDIO_ROWS - start.y, start.h + dr))
+        } else if (resizeDir === 'ne') {
+          ny = Math.max(0, Math.min(start.y + start.h - 2, start.y + dr))
+          nh = start.h + (start.y - ny)
+          nw = Math.max(2, Math.min(STUDIO_COLS - start.x, start.w + dc))
+        } else if (resizeDir === 'nw') {
+          nx = Math.max(0, Math.min(start.x + start.w - 2, start.x + dc))
+          ny = Math.max(0, Math.min(start.y + start.h - 2, start.y + dr))
+          nw = start.w + (start.x - nx)
+          nh = start.h + (start.y - ny)
+        }
+
+        updateSectionMapBox(
+          section.id,
+          { ...start, x: nx, y: ny, w: nw, h: nh },
+          { mode: 'resize', startBox: start }
+        )
+      }
+    }
+
+    function onUp() {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: isUserMode ? 16 : 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+          {!isUserMode && (
+            <span style={{ background: 'var(--accent-dim)', color: 'var(--accent)', borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 700 }}>
+              {placedSteps.length}/{allSteps.length} 배치됨
+            </span>
+          )}
+          <span style={{ color: mode === 'path' ? 'var(--text-muted)' : '#9fb3ff' }}>
+            {mode === 'path'
+              ? selectedId
+                ? '도면을 클릭해 스텝을 배치하세요'
+                : '핀 드래그로 이동 · 더블클릭으로 제거'
+              : '게임 플로우를 유저 여정과 Xkit 화면 흐름으로 연결해 편집하세요'}
+          </span>
+        </div>
+      </div>
+
+      {mode === 'path' ? (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+              {selectedId && <span style={{ color: '#f59e0b', fontWeight: 700 }}>선택한 스텝을 도면 위에 배치 중</span>}
+              {!selectedId && unplacedSteps.length > 0 && <span>아래 미배치 스텝을 클릭해 배치할 수 있습니다</span>}
+              {unplacedSteps.length === 0 && <span style={{ color: '#00d4aa' }}>모든 스텝이 배치되었습니다</span>}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>
+                  섹션 모양 편집
+                </span>
+                <button
+                  onClick={() => setSectionCellEditMode(prev => (prev === 'add' ? null : 'add'))}
+                  style={{
+                    width: 22, height: 22, borderRadius: 999, border: '1px solid var(--border)',
+                    background: sectionCellEditMode === 'add' ? 'rgba(182,255,97,0.2)' : 'rgba(255,255,255,0.05)',
+                    color: sectionCellEditMode === 'add' ? '#b6ff61' : 'var(--text-muted)',
+                    cursor: 'pointer', fontWeight: 800, lineHeight: 1,
+                  }}
+                  title="섹션 칸 추가 모드"
+                >
+                  +
+                </button>
+                <button
+                  onClick={() => setSectionCellEditMode(prev => (prev === 'remove' ? null : 'remove'))}
+                  style={{
+                    width: 22, height: 22, borderRadius: 999, border: '1px solid var(--border)',
+                    background: sectionCellEditMode === 'remove' ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)',
+                    color: sectionCellEditMode === 'remove' ? '#ef4444' : 'var(--text-muted)',
+                    cursor: 'pointer', fontWeight: 800, lineHeight: 1,
+                  }}
+                  title="섹션 칸 제거 모드"
+                >
+                  −
+                </button>
+              </div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, marginRight: 2 }}>섹션 선택</span>
+                {sheet.sections.map((sec, i) => (
+                  <button
+                    key={sec.id}
+                    onClick={() => setSelectedSectionId(prev => (prev === sec.id ? null : sec.id))}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      borderRadius: 999,
+                      border: `1px solid ${SECTION_COLORS[i % SECTION_COLORS.length]}66`,
+                      background: selectedSectionId === sec.id
+                        ? `${SECTION_COLORS[i % SECTION_COLORS.length]}22`
+                        : 'rgba(255,255,255,0.03)',
+                      color: selectedSectionId === sec.id
+                        ? SECTION_COLORS[i % SECTION_COLORS.length]
+                        : 'var(--text-muted)',
+                      fontSize: 10,
+                      fontWeight: selectedSectionId === sec.id ? 700 : 500,
+                      padding: '3px 8px',
+                      cursor: 'pointer',
+                    }}
+                    title="편집 대상 섹션 선택"
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: SECTION_COLORS[i % SECTION_COLORS.length], flexShrink: 0 }} />
+                    <span>{getSectionDisplayTitle(i, sec.title)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ width: '100%', position: 'relative' }}>
+            {/* 외부 프레임: 리사이즈로 높이만 바뀌고 내용은 클리핑됨 */}
+            <div
+              style={{
+                overflow: 'hidden',
+                height: mapHeight != null ? mapHeight : undefined,
+                border: selectedId ? '2px dashed #f59e0b' : '1px solid var(--border)',
+                borderRadius: 16,
+                transition: 'border-color 0.2s',
+              }}
+            >
+              {/* 비율 유지 래퍼: 섹션/핀의 % height 계산 기준 */}
+              <div style={{ position: 'relative', width: '100%', paddingBottom: `${(STUDIO_HEIGHT / STUDIO_WIDTH) * 100}%` }}>
+                <div
+                  ref={mapRef}
+                  onClick={handleMapClick}
+                  onMouseDown={handleMapMouseDown}
+                  onMouseMove={handleMapMouseMove}
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: selectedId ? 'radial-gradient(circle, #1a2a3a 0%, #0d1117 100%)' : '#0d1117',
+                    cursor: sectionCellEditMode ? 'crosshair' : selectedId ? 'crosshair' : draggingId ? 'grabbing' : 'default',
+                    userSelect: 'none',
+                  }}
+                >
+              <FloorPlanPlaceholder />
+
+              {sheet.sections.map((sec, i) => {
+                const color = sectionColorMap[sec.id] || SECTION_COLORS[i % SECTION_COLORS.length]
+                const box = getSectionMapBox(sec, i)
+                const cells = getSectionCellSet(sec, i)
+                const labelAnchor = getSectionLabelAnchor(cells, box)
+                const outline = buildSectionOutlineSegments(cells)
+                const selectedSection = selectedSectionId === sec.id
+                const isShapeEditing = sectionCellEditMode !== null
+                const overlapArrows = (() => {
+                  const byCell = new Map<string, { cell: { x: number; y: number }; direction: ArrowDirection }>()
+                  const nextSection = sheet.sections[i + 1]
+                  if (!nextSection) return []
+                  const nextCells = getSectionCellSet(nextSection, i + 1)
+                  const nextCenter = getSectionCenter(nextCells)
+
+                  cells.forEach(k => {
+                    if (!nextCells.has(k) || byCell.has(k)) return
+                    const p = parseCellKey(k)
+                    const direction = getArrowDirection({ x: p.x + 0.5, y: p.y + 0.5 }, nextCenter)
+                    byCell.set(k, { cell: p, direction })
+                  })
+
+                  return Array.from(byCell.values())
+                })()
+                return (
+                  <div key={`box-${sec.id}`} style={{ position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none' }}>
+                    {isShapeEditing ? (
+                      Array.from(cells).map(k => {
+                        const p = parseCellKey(k)
+                        return (
+                          <div
+                            key={`${sec.id}-${k}`}
+                          style={{
+                            position: 'absolute',
+                            left: `${p.x * SECTION_CELL_PCT_W}%`,
+                            top: `${p.y * SECTION_CELL_PCT_H}%`,
+                              width: `${SECTION_CELL_PCT_W}%`,
+                              height: `${SECTION_CELL_PCT_H}%`,
+                            border: `1px solid ${selectedSection ? color : `${color}55`}`,
+                            background: selectedSection ? `${color}16` : `${color}0f`,
+                            boxSizing: 'border-box',
+                            pointerEvents: 'none',
+                          }}
+                        />
+                        )
+                      })
+                    ) : (
+                      <>
+                        {Array.from(cells).map(k => {
+                          const p = parseCellKey(k)
+                          return (
+                            <div
+                              key={`${sec.id}-view-${k}`}
+                              style={{
+                                position: 'absolute',
+                                left: `${p.x * SECTION_CELL_PCT_W}%`,
+                                top: `${p.y * SECTION_CELL_PCT_H}%`,
+                                width: `${SECTION_CELL_PCT_W}%`,
+                                height: `${SECTION_CELL_PCT_H}%`,
+                                background: selectedSection ? `${color}14` : `${color}10`,
+                                boxSizing: 'border-box',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                          )
+                        })}
+                        <svg
+                          viewBox={`0 0 ${STUDIO_COLS} ${STUDIO_ROWS}`}
+                          preserveAspectRatio="none"
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                        >
+                          {outline.map((s, idx) => (
+                            <line
+                              key={`${sec.id}-outline-${idx}`}
+                              x1={s.x1}
+                              y1={s.y1}
+                              x2={s.x2}
+                              y2={s.y2}
+                              stroke={selectedSection ? color : `${color}cc`}
+                              strokeWidth={0.09}
+                              vectorEffect="non-scaling-stroke"
+                              strokeLinecap="square"
+                            />
+                          ))}
+                        </svg>
+                        <div
+                          onMouseDown={e => {
+                            startSectionBoxDrag(e, sec, i, 'move')
+                          }}
+                          onClick={e => {
+                            e.stopPropagation()
+                          }}
+                          style={{
+                            position: 'absolute',
+                            left: `${(box.x / STUDIO_COLS) * 100}%`,
+                            top: `${(box.y / STUDIO_ROWS) * 100}%`,
+                            width: `${(box.w / STUDIO_COLS) * 100}%`,
+                            height: `${(box.h / STUDIO_ROWS) * 100}%`,
+                            borderRadius: 4,
+                            boxSizing: 'border-box',
+                            cursor: selectedSection ? 'move' : 'default',
+                            background: 'transparent',
+                            pointerEvents: 'auto',
+                          }}
+                        />
+                      </>
+                    )}
+                    <div
+                      onMouseDown={e => {
+                        startSectionBoxDrag(e, sec, i, 'move')
+                      }}
+                      onClick={e => {
+                        e.stopPropagation()
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: `${(labelAnchor.x / STUDIO_COLS) * 100}%`,
+                        top: `${(labelAnchor.y / STUDIO_ROWS) * 100}%`,
+                        transform: 'translate(2px,2px)',
+                        fontSize: 10,
+                        color,
+                        fontWeight: 700,
+                        lineHeight: 1.2,
+                        padding: '2px 6px',
+                        borderRadius: 6,
+                        background: selectedSection ? `${color}22` : 'rgba(0,0,0,0.35)',
+                        border: `1px solid ${color}66`,
+                        cursor: mode === 'path' && selectedSection ? 'move' : 'default',
+                        pointerEvents: 'auto',
+                      }}
+                    >
+                      {getSectionDisplayTitle(i, sec.title)}
+                    </div>
+                    {selectedSection && (
+                      <div
+                        onMouseDown={e => {
+                          startSectionBoxDrag(e, sec, i, 'resize', 'se')
+                        }}
+                        onClick={e => e.stopPropagation()}
+                        style={{ ...sectionResizeHandleStyle(color, ((box.x + box.w) / STUDIO_COLS) * 100, ((box.y + box.h) / STUDIO_ROWS) * 100, 'nwse-resize'), pointerEvents: 'auto' }}
+                        title="우하단 크기 조절"
+                      />
+                    )}
+                    {overlapArrows.map((item, idx) => (
+                      <div
+                        key={`overlap-arrow-${sec.id}-${idx}-${item.cell.x}-${item.cell.y}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${item.cell.x * SECTION_CELL_PCT_W}%`,
+                          top: `${item.cell.y * SECTION_CELL_PCT_H}%`,
+                          width: `${SECTION_CELL_PCT_W}%`,
+                          height: `${SECTION_CELL_PCT_H}%`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          pointerEvents: 'none',
+                          zIndex: 4,
+                        }}
+                        title={`출구 방향: ${getSectionAlphaLabel(i)} → ${getSectionAlphaLabel(i + 1)}`}
+                      >
+                        <span
+                          style={{
+                            fontSize: 20,
+                            fontWeight: 900,
+                            lineHeight: 1,
+                            color,
+                            textShadow: `0 0 8px ${color}99`,
+                            userSelect: 'none',
+                          }}
+                        >
+                          {getArrowGlyph(item.direction)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
+
+              {placedSteps.map(step => {
+                const pinColor = getPinColor(step)
+                const pinBg = getPinBg(step)
+                const sectionColor = sectionColorMap[step.sectionId] || '#9b6dff'
+                const pinDraggable = selectedSectionId === step.sectionId
+                const isDragging = draggingId === step.id
+                const isHover = hoverPin === step.id
+                const answerText = (step.output || '').trim() || '—'
+                const sectionIndex = sheet.sections.findIndex(sec => sec.id === step.sectionId)
+                const sectionCells = sectionIndex >= 0 ? getSectionCellSet(sheet.sections[sectionIndex], sectionIndex) : new Set<string>()
+                const sectionBox = sectionIndex >= 0
+                  ? getBoxFromCells(sectionCells, getSectionMapBox(sheet.sections[sectionIndex], sectionIndex))
+                  : { x: 0, y: 0, w: STUDIO_COLS, h: STUDIO_ROWS }
+                const sectionLeftPct = (sectionBox.x / STUDIO_COLS) * 100
+                const sectionRightPct = ((sectionBox.x + sectionBox.w) / STUDIO_COLS) * 100
+                const sectionMidPct = (sectionLeftPct + sectionRightPct) / 2
+                const edgeThresholdPct = Math.max(SECTION_CELL_PCT_W * 0.9, 2)
+                const pinXPct = step.pinX ?? 0
+                const nearLeftEdge = pinXPct <= sectionLeftPct + edgeThresholdPct
+                const nearRightEdge = pinXPct >= sectionRightPct - edgeThresholdPct
+                const answerOnRight = nearLeftEdge ? true : nearRightEdge ? false : pinXPct <= sectionMidPct
+                return (
+                  <div
+                    key={step.id}
+                    onMouseDown={e => handlePinMouseDown(e, step.id, step.pinX!, step.pinY!)}
+                    onClick={e => e.stopPropagation()}
+                    onDoubleClick={e => handlePinDblClick(e, step.id)}
+                    onMouseEnter={e => {
+                      setHoverPin(step.id)
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      setHoverPinRect({ x: r.left + r.width / 2, y: r.top, step, color: pinColor })
+                    }}
+                    onMouseLeave={() => { setHoverPin(null); setHoverPinRect(null) }}
+                    style={{
+                      position: 'absolute',
+                      left: `${step.pinX}%`,
+                      top: `${step.pinY}%`,
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: isDragging ? 100 : isHover ? 10 : 5,
+                      cursor: pinDraggable ? (draggingId ? 'grabbing' : 'grab') : 'default',
+                      opacity: pinDraggable ? 1 : 0.72,
+                      transition: isDragging ? 'none' : 'transform 0.1s',
+                    }}
+                  >
+                    <div style={{
+                      width: isDragging || isHover ? 36 : 30,
+                      height: isDragging || isHover ? 36 : 30,
+                      borderRadius: '50%',
+                      background: pinBg,
+                      border: `2px solid ${pinColor}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: `0 0 ${isHover ? 12 : 6}px ${pinColor}88`,
+                      transition: 'all 0.15s',
+                      position: 'relative',
+                    }}>
+                      <span style={{ fontSize: isDragging || isHover ? 12 : 10, fontWeight: 800, color: pinColor }}>
+                        {step.displayIndex}
+                      </span>
+                      <div style={{
+                        position: 'absolute', bottom: -2, right: -2,
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: sectionColor, border: '1px solid #0d1117',
+                      }} />
+                    </div>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        [answerOnRight ? 'left' : 'right']: '100%',
+                        transform: answerOnRight ? 'translate(8px, -50%)' : 'translate(-8px, -50%)',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: 'var(--text-primary)',
+                        background: '#1a1a2e',
+                        border: `1px solid ${pinColor}66`,
+                        borderRadius: 6,
+                        padding: '2px 6px',
+                        whiteSpace: 'nowrap',
+                        maxWidth: 180,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        pointerEvents: 'none',
+                        boxShadow: `0 2px 8px ${pinColor}33`,
+                      }}
+                      title={answerText}
+                    >
+                      {answerText}
+                    </div>
+
+                  </div>
+                )
+              })}
+
+              {selectedId && (
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  background: 'rgba(245,158,11,0.05)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}>
+                  <div style={{
+                    background: 'rgba(0,0,0,0.7)', borderRadius: 12,
+                    padding: '10px 20px', fontSize: 13, color: '#f59e0b', fontWeight: 600,
+                  }}>
+                    클릭하여 배치
+                  </div>
+                </div>
+              )}
+                </div>
+              </div>
+            </div>
+            {/* 모서리 리사이즈 핸들 (SW, SE) */}
+            {(['sw', 'se'] as const).map(corner => (
+              <div
+                key={corner}
+                onMouseDown={e => handleResizeMouseDown(e, corner)}
+                style={{
+                  position: 'absolute',
+                  bottom: -5,
+                  ...(corner === 'sw' ? { left: -5 } : { right: -5 }),
+                  width: 12,
+                  height: 12,
+                  borderRadius: 3,
+                  background: '#f59e0b',
+                  border: '2px solid #0d1117',
+                  cursor: 's-resize',
+                  zIndex: 100,
+                  opacity: 0.8,
+                }}
+              />
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8 }}>
+                미배치 스텝 {unplacedSteps.length > 0 ? `(${unplacedSteps.length})` : ''}
+              </div>
+              {unplacedSteps.length === 0 ? (
+                <div style={{ padding: '10px 16px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 10, fontSize: 12, color: '#00d4aa' }}>
+                  모두 배치됨
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {unplacedSteps.map(step => {
+                    const pinColor = getPinColor(step)
+                    const isSelected = selectedId === step.id
+                    return (
+                      <div
+                        key={step.id}
+                        onClick={() => setSelectedId(isSelected ? null : step.id)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 7,
+                          padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
+                          border: isSelected ? `1px solid ${pinColor}` : '1px solid var(--border)',
+                          background: isSelected ? `${pinColor}22` : 'var(--bg-card)',
+                          transition: 'all 0.15s',
+                          maxWidth: 220,
+                        }}
+                      >
+                        <div style={{
+                          width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                          background: getPinBg(step),
+                          border: `2px solid ${pinColor}`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 9, fontWeight: 800, color: pinColor,
+                        }}>
+                          {step.displayIndex}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: isSelected ? pinColor : 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {step.clue || '(무제)'}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {step.sectionTitle}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ flexShrink: 0, minWidth: 180, marginLeft: 'auto' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textAlign: 'right' }}>분류 컬러</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', justifyContent: 'flex-end' }}>
+                {[
+                  { label: 'Xkit', color: '#f59e0b' },
+                  { label: 'Lock', color: '#00d4aa' },
+                  { label: 'Dev', color: '#4da6ff' },
+                  { label: '기타', color: '#9b6dff' },
+                  { label: 'AUTO', color: '#6b7280' },
+                ].map(item => (
+                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-muted)' }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.color }} />
+                    <span>{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <UserFlowPanel
+          userFlow={userFlow}
+          projectName={projectName}
+          sections={sheet.sections}
+          allSteps={allSteps}
+          onPatchUserFlow={updateUserFlow}
+          onUpdateScreen={updateUserScreen}
+          onUploadScreen={handleUserScreenUpload}
+        />
+      )}
+
+      {/* 핀 호버 팝업 — overflow:hidden 프레임 밖에 포털로 렌더링 */}
+      {hoverPinRect && !draggingId && createPortal(
+        <div style={{
+          position: 'fixed',
+          left: hoverPinRect.x,
+          top: hoverPinRect.y - 8,
+          transform: 'translateX(-50%) translateY(-100%)',
+          background: '#1a1a2e',
+          border: `1px solid ${hoverPinRect.color}`,
+          borderRadius: 8,
+          padding: '6px 10px',
+          minWidth: 140,
+          maxWidth: 220,
+          zIndex: 9999,
+          pointerEvents: 'none',
+          boxShadow: `0 4px 16px ${hoverPinRect.color}44`,
+        }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
+            {hoverPinRect.step.sectionTitle}
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: hoverPinRect.color, marginBottom: 4 }}>
+            #{hoverPinRect.step.displayIndex} {hoverPinRect.step.clue}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+            IN: {hoverPinRect.step.input || '—'}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+            OUT: {hoverPinRect.step.output || '—'}
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+            {hoverPinRect.step.xkit && <span style={miniBadge('#3a2a00', '#f59e0b')}>Xkit</span>}
+            {hoverPinRect.step.key && <span style={miniBadge('#1a3a2a', '#00d4aa')}>Key</span>}
+            {hoverPinRect.step.dev && <span style={miniBadge('#1e3a5f', '#4da6ff')}>Dev</span>}
+            {hoverPinRect.step.auto && <span style={miniBadge('#222', '#9ca3af')}>AUTO</span>}
+            {hoverPinRect.step.problemType && <span style={miniBadge('var(--accent-dim)', 'var(--accent)')}>{hoverPinRect.step.problemType}</span>}
+          </div>
+          <div style={{ fontSize: 9, color: '#4b5563', marginTop: 4 }}>더블클릭으로 핀 제거</div>
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
+function UserFlowPanel({
+  userFlow,
+  projectName,
+  sections,
+  allSteps,
+  onPatchUserFlow,
+  onUpdateScreen,
+  onUploadScreen,
+}: {
+  userFlow: UserFlowConfig
+  projectName?: string
+  sections: GameFlowSection[]
+  allSteps: StepWithContext[]
+  onPatchUserFlow: (next: UserFlowConfig) => void
+  onUpdateScreen: (screenId: string, patch: Partial<UserFlowScreen>) => void
+  onUploadScreen: (screenId: string, file: File | null) => Promise<void>
+}) {
+  const [previewScreenId, setPreviewScreenId] = useState<string | null>(null)
+  const previewScreen = useMemo(
+    () => userFlow.screens.find(screen => screen.id === previewScreenId) ?? null,
+    [previewScreenId, userFlow.screens]
+  )
+
+  useEffect(() => {
+    if (!previewScreenId) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setPreviewScreenId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [previewScreenId])
+
+  function toggleAnswerContinuation(screenId: string, enabled: boolean) {
+    const byId = new Map(userFlow.screens.map(screen => [screen.id, { ...screen }]))
+    const current = byId.get(screenId)
+    if (!current || !current.sourceNodeId) return
+
+    const sameSource = (screen: UserFlowScreen | undefined) =>
+      Boolean(screen && screen.sourceNodeId === current.sourceNodeId)
+
+    if (enabled) {
+      const next = current.nextScreenId ? byId.get(current.nextScreenId) : undefined
+      if (!sameSource(next) || next?.screenKind !== 'xkit-answer') {
+        const newAnswer: UserFlowScreen = {
+          id: crypto.randomUUID(),
+          title: current.title,
+          caption: '',
+          linkedStepId: current.linkedStepId,
+          sourceNodeId: current.sourceNodeId,
+          screenKind: 'xkit-answer',
+          xkitSubtype: current.xkitSubtype,
+          statusMode: 'default',
+          nextScreenId: undefined,
+        }
+        current.nextScreenId = newAnswer.id
+        byId.set(newAnswer.id, newAnswer)
+      }
+    } else {
+      const removeIds = new Set<string>()
+      let cursorId = current.nextScreenId
+      while (cursorId) {
+        const cursor = byId.get(cursorId)
+        if (!sameSource(cursor) || cursor?.screenKind !== 'xkit-answer') break
+        removeIds.add(cursor.id)
+        cursorId = cursor.nextScreenId
+      }
+      current.nextScreenId = undefined
+      removeIds.forEach(id => byId.delete(id))
+    }
+
+    const base = Array.from(byId.values()).find(screen => screen.sourceNodeId === current.sourceNodeId && screen.screenKind === 'xkit')
+    if (base) {
+      let chainCount = 0
+      const visited = new Set<string>()
+      let cursorId = base.nextScreenId
+      while (cursorId && !visited.has(cursorId)) {
+        visited.add(cursorId)
+        const cursor = byId.get(cursorId)
+        if (!sameSource(cursor) || cursor?.screenKind !== 'xkit-answer') break
+        chainCount += 1
+        cursorId = cursor.nextScreenId
+      }
+      base.answerChainCount = chainCount
+      base.statusMode = chainCount > 0 ? 'answer' : 'default'
+    }
+
+    const originalOrder = userFlow.screens
+    const nextScreens = originalOrder
+      .filter(screen => byId.has(screen.id))
+      .map(screen => byId.get(screen.id)!)
+
+    const appended = Array.from(byId.values()).filter(screen => !originalOrder.some(origin => origin.id === screen.id))
+    onPatchUserFlow({
+      ...userFlow,
+      screens: [...nextScreens, ...appended],
+    })
+  }
+
+  const screenById = useMemo(() => new Map(userFlow.screens.map(screen => [screen.id, screen])), [userFlow.screens])
+  const screenItems = useMemo(() => {
+    const consumed = new Set<string>()
+    const items: Array<{ id: string; kind: 'single' | 'chain'; base: UserFlowScreen; chain: UserFlowScreen[]; tagNo: number }> = []
+    let tagNo = 0
+    userFlow.screens.forEach(screen => {
+      if (consumed.has(screen.id)) return
+      tagNo += 1
+      if (screen.screenKind === 'xkit') {
+        const chain: UserFlowScreen[] = [screen]
+        const visited = new Set<string>([screen.id])
+        let nextId = screen.nextScreenId
+        while (nextId && !visited.has(nextId)) {
+          visited.add(nextId)
+          const next = screenById.get(nextId)
+          if (!next || next.screenKind !== 'xkit-answer') break
+          chain.push(next)
+          nextId = next.nextScreenId
+        }
+        if (chain.length > 1) {
+          items.push({ id: chain.map(node => node.id).join('-'), kind: 'chain', base: screen, chain, tagNo })
+          chain.forEach(node => consumed.add(node.id))
+          return
+        }
+      }
+      items.push({ id: screen.id, kind: 'single', base: screen, chain: [screen], tagNo })
+      consumed.add(screen.id)
+    })
+    return items
+  }, [screenById, userFlow.screens])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <UserJourneyEditor
+        userFlow={userFlow}
+        projectName={projectName}
+        sections={sections}
+        steps={allSteps.map(step => ({
+          id: step.id,
+          sectionId: step.sectionId,
+          sectionTitle: step.sectionTitle,
+          clue: step.clue,
+          story: step.story,
+          input: step.input,
+          xkit: step.xkit,
+          key: step.key,
+          dev: step.dev,
+          output: step.output,
+          globalIndex: step.globalIndex,
+          displayIndex: step.displayIndex,
+        }))}
+        onChangeUserFlow={onPatchUserFlow}
+      />
+
+      <div style={{
+        border: '1px solid var(--border)',
+        borderRadius: 20,
+        background: 'var(--bg-card)',
+        padding: 18,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>Xkit 폰 디스플레이</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>하단에서 화면을 추가하고, 이미지를 첨부해 유저 플로우 스텝과 연결할 수 있습니다.</div>
+          </div>
+        </div>
+
+        {userFlow.screens.length === 0 ? (
+          <div style={{
+            borderRadius: 18,
+            border: '1px dashed var(--border)',
+            padding: '28px 18px',
+            textAlign: 'center',
+            fontSize: 12,
+            color: 'var(--text-muted)',
+          }}>
+            아직 추가된 폰 화면이 없습니다. Xkit 앱 화면이나 와이어프레임 이미지를 붙여 흐름을 정리해보세요.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 4 }}>
+            {screenItems.map(item => (
+              item.kind === 'chain' ? (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    gap: 10,
+                    borderRadius: 22,
+                    border: '1px solid var(--border)',
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(8,10,14,0.94) 100%)',
+                    padding: '14px 14px 0 14px',
+                  }}
+                >
+                  {item.chain.map((chainScreen, index) => (
+                    <div key={chainScreen.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <PhoneScreenCard
+                        screen={chainScreen}
+                        allSteps={allSteps}
+                        onUpdate={onUpdateScreen}
+                        onToggleAnswerContinuation={toggleAnswerContinuation}
+                        onOpenPreview={setPreviewScreenId}
+                        onUpload={onUploadScreen}
+                        merged
+                        tagNo={item.tagNo}
+                      />
+                      {index < item.chain.length - 1 && (
+                        <div
+                          aria-hidden
+                          style={{
+                            alignSelf: 'center',
+                            color: 'var(--text-muted)',
+                            fontSize: 18,
+                            fontWeight: 700,
+                            lineHeight: 1,
+                            opacity: 0.82,
+                            padding: '0 2px',
+                            userSelect: 'none',
+                          }}
+                        >
+                          →
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <PhoneScreenCard
+                  key={item.id}
+                  screen={item.base}
+                  allSteps={allSteps}
+                  onUpdate={onUpdateScreen}
+                  onToggleAnswerContinuation={toggleAnswerContinuation}
+                  onOpenPreview={setPreviewScreenId}
+                  onUpload={onUploadScreen}
+                  tagNo={item.tagNo}
+                />
+              )
+            ))}
+          </div>
+        )}
+      </div>
+
+      {previewScreen && (
+        <div
+          role="presentation"
+          onClick={() => setPreviewScreenId(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 80,
+            background: 'rgba(3, 6, 12, 0.76)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 'min(92vw, 520px)',
+              borderRadius: 22,
+              border: '1px solid var(--border)',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(8,10,14,0.98) 100%)',
+              padding: 16,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>{previewScreen.title}</div>
+              <button
+                type="button"
+                onClick={() => setPreviewScreenId(null)}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  background: 'rgba(255,255,255,0.05)',
+                  color: 'var(--text-secondary)',
+                  width: 28,
+                  height: 28,
+                  cursor: 'pointer',
+                }}
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{
+              width: 'min(86vw, 390px)',
+              height: 'min(80vh, 742px)',
+              margin: '0 auto',
+              borderRadius: 36,
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: '#090b0f',
+              padding: 14,
+              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)',
+            }}>
+              <div style={{
+                width: '100%',
+                height: '100%',
+                borderRadius: 28,
+                overflow: 'hidden',
+                background: previewScreen.imageDataUrl ? '#fff' : 'linear-gradient(180deg, rgba(182,255,97,0.09) 0%, rgba(182,255,97,0.02) 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {previewScreen.imageDataUrl ? (
+                  <img src={previewScreen.imageDataUrl} alt={previewScreen.title} style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#fff' }} />
+                ) : (
+                  <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>업로드된 화면이 없습니다</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PhoneScreenCard({
+  screen,
+  allSteps,
+  onUpdate,
+  onToggleAnswerContinuation,
+  onOpenPreview,
+  onUpload,
+  merged = false,
+  tagNo,
+}: {
+  screen: UserFlowScreen
+  allSteps: StepWithContext[]
+  onUpdate: (screenId: string, patch: Partial<UserFlowScreen>) => void
+  onToggleAnswerContinuation: (screenId: string, enabled: boolean) => void
+  onOpenPreview: (screenId: string) => void
+  onUpload: (screenId: string, file: File | null) => Promise<void>
+  merged?: boolean
+  tagNo: number
+}) {
+  const linkedStep = allSteps.find(step => step.id === screen.linkedStepId)
+  const isAutoXkit = screen.screenKind === 'xkit' || screen.screenKind === 'xkit-answer'
+  const canEditStatus = screen.screenKind === 'xkit' || screen.screenKind === 'xkit-answer'
+  const answerChainCount = Math.max(1, Math.min(9, screen.answerChainCount ?? 1))
+  const answerEnabled = screen.screenKind === 'xkit'
+    ? (screen.statusMode ?? 'default') === 'answer'
+    : Boolean(screen.nextScreenId)
+  const subtype = (screen.xkitSubtype ?? 'Clues') as 'Clues' | 'Audio' | 'Video'
+  const subtypeMeta = xkitSubtypeMeta[subtype]
+  const canEditSubtypeBadge = screen.screenKind === 'xkit-answer'
+
+  return (
+    <div style={{
+      minWidth: 320,
+      maxWidth: 340,
+      minHeight: 860,
+      borderRadius: 22,
+      border: merged ? 'none' : '1px solid var(--border)',
+      background: merged ? 'transparent' : 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(8,10,14,0.94) 100%)',
+      padding: merged ? 0 : 14,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      position: 'relative',
+      paddingBottom: merged ? 26 : 40,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <input
+          value={screen.title}
+          onChange={e => onUpdate(screen.id, { title: e.target.value })}
+          placeholder="화면 이름"
+          style={flowInputStyle(13, '#fff', 700)}
+          readOnly={isAutoXkit}
+        />
+      </div>
+
+      <input
+        id={`screen-upload-${screen.id}`}
+        type="file"
+        accept="image/*"
+        onChange={async e => {
+          await onUpload(screen.id, e.target.files?.[0] ?? null)
+          e.target.value = ''
+        }}
+        style={{ display: 'none' }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, minHeight: 24 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {isAutoXkit && (
+            <>
+              <span style={xkitMetaBadgeStyle}>{linkedStep ? `연결 STEP ${linkedStep.displayIndex}` : '연결 STEP —'}</span>
+              <span
+                onClick={() => {
+                  if (!canEditSubtypeBadge) return
+                  onUpdate(screen.id, { xkitSubtype: getNextXkitSubtype(subtype) })
+                }}
+                role={canEditSubtypeBadge ? 'button' : undefined}
+                title={canEditSubtypeBadge ? '클릭하여 타입 변경' : undefined}
+                style={{
+                  ...xkitMetaBadgeStyle,
+                  color: subtypeMeta.color,
+                  border: `1px solid ${subtypeMeta.color}55`,
+                  background: subtypeMeta.bg,
+                  cursor: canEditSubtypeBadge ? 'pointer' : 'default',
+                  userSelect: 'none',
+                }}
+              >
+                {subtypeMeta.short}
+              </span>
+            </>
+          )}
+        </div>
+        <label
+          htmlFor={`screen-upload-${screen.id}`}
+          style={xkitMetaUploadButtonStyle}
+          title="이미지 업로드"
+        >
+          <UploadIcon width={10} height={10} />
+        </label>
+      </div>
+
+      <div style={{
+        alignSelf: 'center',
+        width: 216,
+        height: 412,
+        position: 'relative',
+        overflow: 'visible',
+        borderRadius: 28,
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: '#090b0f',
+        padding: 10,
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04)',
+        cursor: 'zoom-in',
+      }}>
+        <div style={{
+          width: '100%',
+          height: '100%',
+          borderRadius: 22,
+          overflow: 'hidden',
+          background: screen.imageDataUrl ? '#fff' : 'linear-gradient(180deg, rgba(182,255,97,0.09) 0%, rgba(182,255,97,0.02) 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative',
+          cursor: 'zoom-in',
+        }}>
+          {screen.imageDataUrl ? (
+            <img
+              src={screen.imageDataUrl}
+              alt={screen.title}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onClick={() => onOpenPreview(screen.id)}
+            />
+          ) : (
+            <div
+              style={{ width: '100%', height: '100%' }}
+              onClick={() => onOpenPreview(screen.id)}
+            />
+          )}
+        </div>
+      </div>
+
+      <div style={{
+        width: '100%',
+        borderRadius: 12,
+        border: '1px solid var(--border)',
+        background: 'rgba(255,255,255,0.03)',
+        color: 'var(--text-primary)',
+        padding: '10px 12px',
+        fontSize: 12,
+        fontWeight: 700,
+      }}>
+        {linkedStep ? `STEP ${linkedStep.displayIndex} · ${linkedStep.clue}` : 'STEP —'}
+      </div>
+
+      {isAutoXkit && (
+        <>
+          {canEditStatus && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderRadius: 12,
+              border: '1px solid var(--border)',
+              background: 'rgba(255,255,255,0.03)',
+              padding: '10px 12px',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>상태 타입</div>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <span style={{ fontSize: 11, color: answerEnabled ? '#b6ff61' : 'var(--text-muted)', fontWeight: 700 }}>
+                  {answerEnabled ? 'Answer' : 'Default'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={answerEnabled}
+                  onChange={e => {
+                    if (screen.screenKind === 'xkit') {
+                      onUpdate(screen.id, {
+                        statusMode: e.target.checked ? 'answer' : 'default',
+                        answerChainCount: e.target.checked ? answerChainCount : 0,
+                      })
+                      return
+                    }
+                    onToggleAnswerContinuation(screen.id, e.target.checked)
+                  }}
+                  style={{ display: 'none' }}
+                />
+                <span style={{
+                  width: 34,
+                  height: 20,
+                  borderRadius: 999,
+                  border: '1px solid rgba(182,255,97,0.35)',
+                  background: answerEnabled ? 'rgba(182,255,97,0.35)' : 'rgba(255,255,255,0.08)',
+                  position: 'relative',
+                  transition: 'all 0.15s ease',
+                }}>
+                  <span style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: answerEnabled ? 16 : 2,
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: answerEnabled ? '#b6ff61' : '#cbd5e1',
+                    transition: 'left 0.15s ease, background 0.15s ease',
+                  }} />
+                </span>
+              </label>
+            </div>
+          )}
+
+          <label style={{ display: 'block' }}>
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+              정답 텍스트
+            </span>
+            <input
+              value={screen.answerText ?? ''}
+              onChange={e => onUpdate(screen.id, { answerText: e.target.value })}
+              placeholder="정답 입력"
+              disabled={!answerEnabled}
+              style={{
+                width: '100%',
+                borderRadius: 12,
+                border: '1px solid var(--border)',
+                background: 'rgba(255,255,255,0.03)',
+                color: 'var(--text-primary)',
+                padding: '10px 12px',
+                fontSize: 12,
+                opacity: answerEnabled ? 1 : 0.45,
+              }}
+            />
+          </label>
+        </>
+      )}
+
+      <textarea
+        value={screen.caption ?? ''}
+        onChange={e => onUpdate(screen.id, { caption: e.target.value })}
+        placeholder="이 화면의 목적이나 유저 액션 메모"
+        rows={4}
+        style={flowTextareaStyle}
+      />
+
+      <div
+        style={{
+          position: 'absolute',
+          left: merged ? 0 : 14,
+          bottom: 10,
+          fontSize: 11,
+          fontWeight: 800,
+          color: '#b6ff61',
+        }}
+      >
+        {`TAG ${tagNo}`}
+      </div>
+    </div>
+  )
+}
+
+function miniBadge(bg: string, color: string): React.CSSProperties {
+  return {
+    fontSize: 9,
+    background: bg,
+    color,
+    borderRadius: 999,
+    padding: '2px 7px',
+    fontWeight: 700,
+  }
+}
+
+function flowInputStyle(fontSize: number, color: string, fontWeight: number): React.CSSProperties {
+  return {
+    width: '100%',
+    border: 'none',
+    outline: 'none',
+    background: 'transparent',
+    color,
+    fontSize,
+    fontWeight,
+    padding: 0,
+  }
+}
+
+const flowTextareaStyle: React.CSSProperties = {
+  width: '100%',
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(255,255,255,0.03)',
+  color: 'var(--text-secondary)',
+  padding: '10px 12px',
+  fontSize: 12,
+  lineHeight: 1.5,
+  resize: 'vertical',
+}
+
+const xkitMetaBadgeStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: '#b6ff61',
+  border: '1px solid rgba(182,255,97,0.35)',
+  background: 'rgba(182,255,97,0.12)',
+  borderRadius: 999,
+  padding: '3px 8px',
+}
+
+const xkitMetaUploadButtonStyle: React.CSSProperties = {
+  ...xkitMetaBadgeStyle,
+  color: '#e5e7eb',
+  border: '1px solid rgba(255,255,255,0.22)',
+  background: 'rgba(255,255,255,0.06)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  minWidth: 24,
+  minHeight: 22,
+  padding: '3px 7px',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.22)',
+}
+
+function getNextXkitSubtype(current: 'Clues' | 'Audio' | 'Video'): 'Clues' | 'Audio' | 'Video' {
+  if (current === 'Clues') return 'Audio'
+  if (current === 'Audio') return 'Video'
+  return 'Clues'
+}
+
+function sectionResizeHandleStyle(color: string, leftPct: number, topPct: number, cursor: React.CSSProperties['cursor']): React.CSSProperties {
+  return {
+    position: 'absolute',
+    left: `${leftPct}%`,
+    top: `${topPct}%`,
+    transform: 'translate(-6px,-6px)',
+    width: 10,
+    height: 10,
+    borderRadius: 3,
+    border: `1px solid ${color}`,
+    background: '#0d1117',
+    cursor,
+    zIndex: 3,
+  }
+}
+
+const xkitSubtypeMeta: Record<'Clues' | 'Audio' | 'Video', { short: string; color: string; bg: string }> = {
+  Clues: { short: 'CLUE', color: '#f59e0b', bg: 'rgba(245,158,11,0.14)' },
+  Audio: { short: 'AUDIO', color: '#22d3ee', bg: 'rgba(34,211,238,0.14)' },
+  Video: { short: 'VIDEO', color: '#f472b6', bg: 'rgba(244,114,182,0.14)' },
+}
+
+function FloorPlanPlaceholder() {
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: '#0a0a14' }}>
+      <svg viewBox={`0 0 ${STUDIO_WIDTH} ${STUDIO_HEIGHT}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.15 }}>
+        <defs>
+          <pattern id="grid" width={STUDIO_TILE} height={STUDIO_TILE} patternUnits="userSpaceOnUse">
+            <path d={`M ${STUDIO_TILE} 0 L 0 0 0 ${STUDIO_TILE}`} fill="none" stroke="#4a5568" strokeWidth="0.5" />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
+      </svg>
+    </div>
+  )
+}
