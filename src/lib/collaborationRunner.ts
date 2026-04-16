@@ -104,9 +104,9 @@ function normalizeReports(reports: AgentReport[]): AgentReport[] {
   return reports.map(report => ({ ...report, status: 'done' as const }))
 }
 
-function getStartedAt(snapshot?: CollaborationSnapshot | null) {
-  return snapshot?.startedAt ?? new Date().toISOString()
-}
+// function getStartedAt(snapshot?: CollaborationSnapshot | null) {
+//   return snapshot?.startedAt ?? new Date().toISOString()
+// }
 
 function runJob(project: Project, version: ProjectVersion, mode: RerunMode, startAgentId?: AgentId) {
   const abortController = new AbortController()

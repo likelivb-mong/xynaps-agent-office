@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, addVersionToProject, updateVersionReports, getAllSkills, getCommonSkills, updateVersionGameFlow, updateAgentReportChat, saveProject, updateProjectCollaborationStatus } from '../lib/storage'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateAgentReportChat, saveProject } from '../lib/storage'
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
 import { compileGameFlow } from '../lib/api'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
@@ -12,7 +12,7 @@ import { MetaStudio } from '../components/MetaStudio'
 import { WorkshopTab } from '../components/workshop/WorkshopTab'
 import { AGENTS } from '../data/agents'
 import { BRANCH_CODES } from '../data/questData'
-import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, ChatMessage, DetailVersion, SkillFile, BranchCode, CrimeConfig, CharacterRole, StoryStageKey } from '../types'
+import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, ChatMessage, DetailVersion, BranchCode, CrimeConfig, CharacterRole, StoryStageKey } from '../types'
 
 // ─── 브리핑 섹션 ────────────────────────────────────────────────────────────
 function BriefingSection({

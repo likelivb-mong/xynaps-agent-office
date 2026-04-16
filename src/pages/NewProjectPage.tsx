@@ -1107,7 +1107,7 @@ export function NewProjectPage() {
   const [driveLinkError, setDriveLinkError] = useState<string | null>(null)
   const [driveSyncing, setDriveSyncing] = useState(false)
   const [driveSyncSummary, setDriveSyncSummary] = useState<string | null>(null)
-  const [autoFilling, setAutoFilling] = useState(false)
+  const [_autoFilling, setAutoFilling] = useState(false)
   const [autoFillError, setAutoFillError] = useState<string | null>(null)
   const [autoFillSummary, setAutoFillSummary] = useState<string | null>(null)
   const [autoFillPhase, setAutoFillPhase] = useState<AutoFillPhase>('idle')

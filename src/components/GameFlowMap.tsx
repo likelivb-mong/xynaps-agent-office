@@ -372,7 +372,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
-export function GameFlowMap({ sheet, floorPlanImage, onChange, mode = 'path', projectName }: Props) {
+export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [hoverPin, setHoverPin] = useState<string | null>(null)

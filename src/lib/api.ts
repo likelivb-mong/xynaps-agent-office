@@ -1,4 +1,4 @@
-import type { Agent, SkillFile, AgentReport, AgentId, CrimeConfig, GameFlowSheet, GameFlowSection, GameStep, ProblemType, ChatMessage, GameSystemType, BriefingData, CharacterRole, RelationType, StoryStageKey, WorkshopSession } from '../types'
+import type { Agent, SkillFile, AgentReport, AgentId, CrimeConfig, GameFlowSheet, GameFlowSection, GameStep, ProblemType, ChatMessage, GameSystemType, BriefingData, CharacterRole, StoryStageKey, WorkshopSession } from '../types'
 import { AGENTS } from '../data/agents'
 import { XKIT_DEFINITION } from '../data/questData'
 
@@ -134,7 +134,7 @@ function buildFileContent(files: SkillFile[]) {
 
 const STAGE_KEYS: StoryStageKey[] = ['기', '승', '전', '반전', '결']
 const ROLE_SET = new Set<CharacterRole>(['가해자', '피해자', '목격자', '주변인물', '공범', '의뢰인'])
-const RELATION_SET = new Set<RelationType>(['원한', '연인', '가족', '친구', '동료', '공모자', '피고용', '피해', '모르는 사이', '기타'])
+// const RELATION_SET = new Set<RelationType>(['원한', '연인', '가족', '친구', '동료', '공모자', '피고용', '피해', '모르는 사이', '기타'])
 
 function normStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return []
