@@ -5,6 +5,96 @@ import { XKIT_DEFINITION } from '../data/questData'
 const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 const DRIVE_API_KEY = import.meta.env.VITE_GOOGLE_DRIVE_API_KEY
 
+const MODEL_DEEP = 'claude-opus-4-7'
+const MODEL_FAST = 'claude-sonnet-4-6'
+
+const THINKING_HEAVY = { type: 'enabled' as const, budget_tokens: 16000 }
+const THINKING_DEEP  = { type: 'enabled' as const, budget_tokens: 12000 }
+const THINKING_LIGHT = { type: 'enabled' as const, budget_tokens: 8000 }
+
+const QUALITY_DIRECTIVE = `
+보고서 품질 원칙 (반드시 준수):
+1. 스킬 파일의 레퍼런스를 깊이 분석하고 구체 수치·사례·용어를 직접 인용하세요.
+2. 이전 에이전트 보고서가 있다면 모순 없이 연결하고, 누락된 연결고리를 먼저 메꾸세요.
+3. 추상적 서술("몰입감 있는", "독창적인") 대신 플레이어의 구체적 행동·감각·상태로 치환하세요.
+4. 최소 하나 이상의 대안(Plan B)을 제시하고 선택 근거를 밝히세요.
+5. 작성 후 스스로 검증: ① 역할 핵심 산출물 포함? ② 스킬 레퍼런스 반영? ③ 타 에이전트와 정합?
+`.trim()
+
+// ── Settings-aware model resolution ────────────────────────────────────────────
+
+type ModelQuality = '절약' | '균형' | '최고'
+const SETTINGS_KEY = 'xynaps_v2_settings'
+
+function getQuality(): ModelQuality {
+  try { return (JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').modelQuality ?? '균형') as ModelQuality }
+  catch { return '균형' }
+}
+
+function isMaxMode(): boolean {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').useMax === true }
+  catch { return false }
+}
+
+function resolveModel(purpose: 'fast' | 'deep'): string {
+  const q = getQuality()
+  if (q === '절약') return MODEL_FAST
+  if (q === '균형') return purpose === 'deep' ? MODEL_DEEP : MODEL_FAST
+  return MODEL_DEEP
+}
+
+function resolveThinking(purpose: 'fast' | 'deep'): typeof THINKING_DEEP | undefined {
+  if (isMaxMode()) return undefined // local server handles model/thinking internally
+  const q = getQuality()
+  if (q === '절약') return undefined
+  if (q === '균형') return purpose === 'deep' ? THINKING_LIGHT : undefined
+  return purpose === 'deep' ? THINKING_HEAVY : THINKING_DEEP
+}
+
+function resolveMaxTokens(purpose: 'fast' | 'deep'): number {
+  const q = getQuality()
+  const thinkingBudget = resolveThinking(purpose)?.budget_tokens ?? 0
+  let tokens: number
+  if (q === '절약') tokens = purpose === 'deep' ? 3000 : 1500
+  else if (q === '균형') tokens = purpose === 'deep' ? 16000 : 3000
+  else tokens = purpose === 'deep' ? 24000 : 8000
+  return Math.max(tokens, thinkingBudget + 2000)
+}
+
+function resolveApiHeaders(): Record<string, string> {
+  if (isMaxMode()) return { 'Content-Type': 'application/json' }
+  return {
+    'Content-Type': 'application/json',
+    'x-api-key': API_KEY,
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  }
+}
+
+function resolveEndpoint(): string {
+  return isMaxMode()
+    ? 'http://localhost:3001/api/messages'
+    : 'https://api.anthropic.com/v1/messages'
+}
+
+function extractText(data: { content?: Array<{ type: string; text?: string }> }): string {
+  return data.content?.find(b => b.type === 'text')?.text ?? ''
+}
+
+export type CostActionType = 'full-collaboration' | 'rerun-from-agent' | 'game-flow' | 'regenerate'
+
+export function getEstimatedCost(action: CostActionType): string | null {
+  if (isMaxMode()) return null
+  const q = getQuality()
+  const costs: Record<CostActionType, Record<ModelQuality, string>> = {
+    'full-collaboration': { '절약': '약 2,000~4,000원', '균형': '약 14,000~20,000원', '최고': '약 32,000~45,000원' },
+    'rerun-from-agent':   { '절약': '약 300~500원',    '균형': '약 1,800~2,500원',    '최고': '약 4,000~6,000원' },
+    'game-flow':          { '절약': '약 200~400원',    '균형': '약 700~1,500원',      '최고': '약 2,000~4,000원' },
+    'regenerate':         { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
+  }
+  return costs[action][q]
+}
+
 export interface GoogleDriveFileMeta {
   id: string
   name: string
@@ -200,38 +290,71 @@ function extractBalancedJsonBlock(text: string): string | null {
   return null
 }
 
+function escapeNewlinesInJsonStrings(raw: string): string {
+  let result = ''
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]
+    if (escaped) {
+      result += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && inString) {
+      escaped = true
+      result += ch
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+      result += ch
+      continue
+    }
+    if (inString && ch === '\n') { result += '\\n'; continue }
+    if (inString && ch === '\r') { result += '\\r'; continue }
+    if (inString && ch === '\t') { result += '\\t'; continue }
+    result += ch
+  }
+  return result
+}
+
 function tryParseJsonCandidate(raw: string): unknown {
-  const normalized = raw
-    .trim()
-    .replace(/^\uFEFF/, '')
-    .replace(/^json\s*/i, '')
-    .replace(/,\s*([}\]])/g, '$1')
-    .trim()
+  const normalized = escapeNewlinesInJsonStrings(
+    raw
+      .trim()
+      .replace(/^\uFEFF/, '')
+      .replace(/^json\s*/i, '')
+      .replace(/,\s*([}\]])/g, '$1')
+      .trim()
+  )
   return JSON.parse(normalized)
 }
 
 function normalizeLooseJsonCandidate(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^\uFEFF/, '')
-    .replace(/^json\s*/i, '')
-    .replace(/,\s*([}\]])/g, '$1')
-    .replace(/([{,]\s*)([A-Za-z0-9_\u00C0-\uFFFF]+)\s*:/g, '$1"$2":')
-    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, inner: string) => {
-      const escaped = inner
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-      return `"${escaped}"`
-    })
-    .replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (_match, inner: string) => {
-      const escaped = inner
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-      return `"${escaped}"`
-    })
-    .trim()
+  return escapeNewlinesInJsonStrings(
+    raw
+      .trim()
+      .replace(/^\uFEFF/, '')
+      .replace(/^json\s*/i, '')
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/([{,]\s*)([A-Za-z0-9_\u00C0-\uFFFF]+)\s*:/g, '$1"$2":')
+      .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, inner: string) => {
+        const escaped = inner
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\n/g, '\\n')
+        return `"${escaped}"`
+      })
+      .replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (_match, inner: string) => {
+        const escaped = inner
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\n/g, '\\n')
+        return `"${escaped}"`
+      })
+      .trim()
+  )
 }
 
 function parseTaggedBoolean(value: string): boolean {
@@ -322,7 +445,7 @@ function parseModelJsonResponse(text: string): unknown {
 
 async function repairModelJsonResponse(rawText: string, schemaHint: string): Promise<unknown> {
   const response = await fetchAnthropicWithTimeout({
-    model: 'claude-sonnet-4-5',
+    model: MODEL_FAST,
     max_tokens: 3000,
     system: `당신은 손상된 AI 응답을 엄격한 JSON으로 복구하는 정리기입니다.
 반드시 유효한 JSON만 반환하고, 설명/코드펜스/주석/머리말은 절대 포함하지 마세요.
@@ -350,8 +473,9 @@ async function generateTaggedGameFlowResponse(
   attachmentContent: unknown[],
 ): Promise<{ sections: Array<{ title: string; steps: Array<Partial<GameStep>> }> }> {
   const response = await fetchAnthropicWithTimeout({
-    model: 'claude-sonnet-4-5',
-    max_tokens: 3500,
+    model: MODEL_DEEP,
+    max_tokens: 16000,
+    thinking: THINKING_DEEP,
     system: `당신은 방탈출 게임 플로우 시트 전문가입니다.
 JSON 대신, 아래 태그 형식의 줄 텍스트만 반환하세요.
 설명, 머리말, 코드블록, 번호 목록은 절대 쓰지 마세요.
@@ -363,7 +487,11 @@ JSON 대신, 아래 태그 형식의 줄 텍스트만 반환하세요.
 problemType는 반드시 다음 중 하나만 사용:
 평면, 입체, 공간, 감각
 
-섹션마다 실제 플레이 순서대로 STEP을 나열하고, STEP이 없는 SECTION은 만들지 마세요.`,
+설계 원칙:
+- 모든 에이전트 보고서의 내용이 실제 플레이 순서와 인과로 연결되어야 합니다.
+- 각 STEP의 input → output이 다음 STEP의 진입 조건과 맞물리는지 반드시 검증하세요.
+- 퍼즐 유형(problemType)은 텍스트 내용이 아니라 실제 조작 방식으로 판단하세요.
+- 섹션마다 실제 플레이 순서대로 STEP을 나열하고, STEP이 없는 SECTION은 만들지 마세요.`,
     messages: [{
       role: 'user',
       content: [
@@ -380,11 +508,11 @@ ${reportsText}
         },
       ],
     }],
-  }, { timeoutMs: 90000 })
+  }, { timeoutMs: 240000 })
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '태그 게임 플로우 API 오류')
-  const taggedText: string = data.content[0]?.text || ''
+  const taggedText: string = data.content?.find((b: { type?: string; text?: string }) => b?.type === 'text')?.text || ''
   return parseTaggedGameFlowResponse(taggedText)
 }
 
@@ -432,14 +560,9 @@ async function fetchAnthropicWithTimeout(
   options?.signal?.addEventListener('abort', abortForward)
 
   try {
-    return await fetch('https://api.anthropic.com/v1/messages', {
+    return await fetch(resolveEndpoint(), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers: resolveApiHeaders(),
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -497,25 +620,31 @@ ${currentContext}
 - 각 description은 플레이어 관점에서 작성하세요.`
 
   const content: unknown[] = [...fileContent, { type: 'text', text: prompt }]
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 2400,
-      system,
-      messages: [{ role: 'user', content }],
-    }),
-  })
+  const response = await fetchAnthropicWithTimeout({
+    model: resolveModel('fast'),
+    max_tokens: resolveMaxTokens('fast'),
+    system,
+    messages: [{ role: 'user', content }],
+  }, { timeoutMs: 120000 })
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '외부 파일 반영 실패')
-  const text: string = data.content?.[0]?.text || ''
-  const parsed = parseModelJsonResponse(text) as Record<string, unknown>
+  const text: string = extractText(data)
+  let parsed: Record<string, unknown>
+  try {
+    parsed = parseModelJsonResponse(text) as Record<string, unknown>
+  } catch {
+    parsed = await repairModelJsonResponse(text, `{
+  "motives": ["..."],
+  "crimeTypes": ["..."],
+  "clues": ["..."],
+  "methods": ["..."],
+  "location": "...",
+  "genres": ["..."],
+  "characters": [{ "role": "가해자", "name": "...", "background": "..." }],
+  "relations": [{ "fromName": "...", "relationType": "원한", "toName": "...", "description": "..." }],
+  "storyFlow": [{ "stage": "기", "roomName": "...", "description": "..." }]
+}`) as Record<string, unknown>
+  }
 
   const charactersRaw = Array.isArray(parsed.characters) ? parsed.characters : []
   const characters: Array<{ id: string; role: CharacterRole; name: string; background: string }> = charactersRaw
@@ -690,6 +819,8 @@ ${projectContext ? `\n현재 프로젝트 맥락:\n${projectContext}` : ''}
 스킬 파일이 제공된 경우 해당 내용을 전문 지식으로 활용하여 더 깊이 있는 답변을 제공하세요.
 답변은 한국어로 작성하세요.
 
+${QUALITY_DIRECTIVE}
+
 중요 금지 규칙:
 - "07 운영 · 예산" 섹션을 생성하지 마세요.
 - "힌트 프로토콜" 및 "예산 추정/견적" 항목을 보고서에서 기획하지 마세요.
@@ -708,16 +839,18 @@ export async function callAgent(
     { type: 'text', text: userMessage }
   ]
 
+  const thinking = resolveThinking('deep')
   const response = await fetchAnthropicWithTimeout({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 2000,
-      system: getSystemPrompt(agent, projectContext),
-      messages: [{ role: 'user', content: userContent }],
-    }, options)
+    model: resolveModel('deep'),
+    max_tokens: resolveMaxTokens('deep'),
+    ...(thinking ? { thinking } : {}),
+    system: getSystemPrompt(agent, projectContext),
+    messages: [{ role: 'user', content: userContent }],
+  }, options)
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-  return data.content[0]?.text || ''
+  return extractText(data)
 }
 
 export async function chatWithAgent(
@@ -731,23 +864,24 @@ export async function chatWithAgent(
 당신은 지금 사용자와 기획 개선을 위한 전문가 회의를 하고 있습니다.
 이미 작성된 보고서를 기반으로 사용자의 아이디어와 피드백을 논의하세요.
 자연스러운 대화체로 응답하되, 내용은 전문적이고 구체적으로 유지하세요.
-HTML 형식 없이 일반 텍스트로 응답하세요.`
+HTML 형식 없이 일반 텍스트로 응답하세요.
+
+보고서 업그레이드 제안 원칙:
+- 기존 보고서 양식보다 더 나은 구조가 있다고 판단되면 먼저 제안한 뒤 승인을 받고 작성하세요.
+- 제안 형식: "현재 [X] 구조보다 [Y] 방식이 더 효과적일 것 같습니다. [이유]. 이 방향으로 재작성해드릴까요?"
+- 사용자가 승인하면 전체 보고서를 새 구조로 재작성하고, 거절하면 기존 구조로 계속 진행하세요.`
 
   const messages = chatHistory.map(m => ({
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }))
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(resolveEndpoint(), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: resolveApiHeaders(),
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 1500,
+      model: resolveModel('fast'),
+      max_tokens: resolveMaxTokens('fast'),
       system: systemPrompt,
       messages,
     }),
@@ -755,7 +889,7 @@ HTML 형식 없이 일반 텍스트로 응답하세요.`
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-  return data.content[0]?.text || ''
+  return extractText(data)
 }
 
 export async function analyzeSkillFile(
@@ -781,16 +915,12 @@ export async function analyzeSkillFile(
 
 답변은 한국어로 작성하세요. HTML 없이 마크다운 형식으로만 작성하세요.`
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(resolveEndpoint(), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: resolveApiHeaders(),
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 1000,
+      model: resolveModel('fast'),
+      max_tokens: resolveMaxTokens('fast'),
       system: systemPrompt,
       messages: [{ role: 'user', content: [...fileContent, { type: 'text', text: '이 파일의 내용을 분석하고 요약해주세요.' }] }],
     }),
@@ -798,7 +928,7 @@ export async function analyzeSkillFile(
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-  return data.content[0]?.text || ''
+  return extractText(data)
 }
 
 export async function briefAgent(
@@ -833,17 +963,12 @@ ${isFirstMessage
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(resolveEndpoint(), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers: resolveApiHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 800,
+        model: resolveModel('fast'),
+        max_tokens: resolveMaxTokens('fast'),
         system: systemPrompt,
         messages,
       }),
@@ -851,7 +976,7 @@ ${isFirstMessage
 
     const data = await response.json()
     if (!response.ok) throw new Error(data.error?.message || '브리핑 요청에 실패했습니다.')
-    const text = data.content?.find((block: { type?: string; text?: string }) => block?.type === 'text')?.text?.trim() || ''
+    const text = extractText(data).trim()
     if (!text) throw new Error('브리핑 응답이 비어 있습니다. 잠시 후 다시 시도해주세요.')
     return text
   } catch (error) {
@@ -906,6 +1031,11 @@ const HTML_STYLE_GUIDE = `
 <!--XYNAPS_HTML-->
 (다크 테마 인라인 스타일 HTML 시각화)
 
+보고서 구조 원칙:
+- 보고서 형식은 고정 템플릿을 따르지 않습니다.
+- 스킬 파일의 레퍼런스를 참고해 해당 테마와 산출물 성격에 가장 적합한 구조로 자유롭게 설계하고 출력하세요.
+- 기존 양식보다 더 효과적인 구조가 있다면, 보고서 상단에 한 줄로 "구조 제안: [제안 내용]" 을 먼저 명시한 뒤 작성하세요.
+
 HTML 작성 규칙 (반드시 준수):
 - 모든 style은 inline으로만 작성 (외부 CSS, class 사용 금지)
 - font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif
@@ -927,44 +1057,36 @@ HTML 작성 규칙 (반드시 준수):
 
 const AGENT_PROMPT_TEXTS: Record<AgentId, string> = {
   ceo: `크리에이티브 디렉터 관점에서 HTML 시각화 기획안을 작성해주세요.
-포함 항목: 테마 정체성 카드(제목·서브타이틀), 장르 배지, 핵심 감성 키워드 태그, 시각적 방향성(색조·분위기·소품), 콘셉트 핵심 문장.
+스킬 파일의 레퍼런스를 참고해 이 테마에 가장 적합한 구조로 자유롭게 설계하세요.
+핵심 산출물(테마 정체성·장르 전략·콘셉트 방향성)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   concept: `스토리 아키텍트 관점에서 HTML 시각화 기획안을 작성해주세요.
-포함 항목: 등장인물 카드(역할 배지·이름·배경), 인물 관계 표시, 기승전반전결 스토리 타임라인.
+스킬 파일의 레퍼런스를 참고해 이 서사 구조에 가장 적합한 형식으로 자유롭게 설계하세요.
+핵심 산출물(인물 설정·관계·스토리 흐름)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   pd: `게임 디렉터 관점에서 HTML 시각화 기획안을 작성해주세요.
-포함 항목: 핵심 지표(플레이타임·섹션수·퍼즐수·난이도), 섹션별 타임 테이블(공간·시간·퍼즐수·난이도), 엔딩 조건.
+스킬 파일의 레퍼런스를 참고해 이 게임 구조에 가장 적합한 형식으로 자유롭게 설계하세요.
+핵심 산출물(플레이 타임라인·난이도 밸런스·엔딩 조건)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   puzzle: `퍼즐 마스터 관점에서 HTML 시각화 기획안을 작성해주세요.
-Phase별 퍼즐 흐름도 형식으로 작성: 오브젝트 → 획득단서(초록) → 퍼즐조건(주황) → 잠금해제(빨강). X-KIT(파랑)·Key·Dev 태그 표시. X/K/D 수량 요약 카드.
-범례(오브젝트·획득단서·퍼즐조건·잠금해제) 포함.
+스킬 파일의 레퍼런스를 참고해 이 퍼즐 구성에 가장 적합한 형식으로 자유롭게 설계하세요.
+핵심 산출물(퍼즐 흐름·X-KIT/Key/Dev 분류·잠금 연쇄 구조)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   space: `스페이스 디자이너 관점에서 HTML 시각화 기획안을 작성해주세요.
-각 방별 카드 형식: 방 이름(왼쪽 컬러 테두리)·면적·소품 태그 목록(X-KIT/DEV/KEY 색상 구분)·조명·사운드 연출 설명.
+스킬 파일의 레퍼런스를 참고해 이 공간 구성에 가장 적합한 형식으로 자유롭게 설계하세요.
+핵심 산출물(방별 소품 배치·조명·사운드 연출·동선)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   ops: `오퍼레이션 매니저 관점에서 HTML 시각화 기획안을 작성해주세요.
-포함 항목: 플레이어 입장 브리핑, 회차 진행 체크리스트, 안전·비상 대응 체크포인트, 현장 진행 동선 요약.
+스킬 파일의 레퍼런스를 참고해 이 운영 환경에 가장 적합한 형식으로 자유롭게 설계하세요.
+핵심 산출물(브리핑·운영 체크리스트·안전 대응·현장 동선)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   sound: `음향술사 관점에서 서라운드 오디오 스크립트를 HTML 시각화로 작성해주세요.
-
-장면(Scene)별 오디오 스크립트 테이블 형식:
-- 장면명 / 상황 설명
-- 사운드 레이어: 앰비언트(배경음) / 이펙트(효과음) / 내레이션(음성)
-- 서라운드 포지션: L(좌)·C(중앙)·R(우)·SL(후좌)·SR(후우) 배치
-- 타이밍 큐 (예: 플레이어 입장 시, 단서 발견 시, 타이머 종료 30초 전)
-- 감정 강도: 긴장 / 공포 / 완화 / 클라이맥스
-
-추가 포함: 전체 헤드셋 사운드 채널 맵, 핵심 이펙트 목록, 나레이션 대본 주요 큐.
+스킬 파일의 레퍼런스를 참고해 이 사운드 연출에 가장 적합한 구조로 자유롭게 설계하세요.
+핵심 산출물(장면별 사운드 레이어·서라운드 포지션·타이밍 큐·감정 강도)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   xfiler: `엑스파일러 관점에서 크라임씬 수사 시스템을 HTML 시각화로 작성해주세요.
-
-포함 항목:
-- 범행 현장 증거 목록 (물리적·법의학적·증언 증거 카드 형식)
-- 수사 플로우 (단서 → 분석 → 용의자 특정 → 검거 순서)
-- 용의자 프로파일 카드 (외모·알리바이·심리 특성)
-- 마네킹/시체 모형 배치 설명 (위치·자세·주변 증거)
-- 검거 조건 및 승리 조건 (진범 지목 + 물증 3개 이상 등)
-- 수사 검증 체크포인트 (단서 상충 여부, 오판 방지 확인 항목)
+스킬 파일의 레퍼런스를 참고해 이 사건 구조에 가장 적합한 형식으로 자유롭게 설계하세요.
+핵심 산출물(증거 목록·수사 플로우·용의자 프로파일·검거 조건)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
 }
 
@@ -1047,16 +1169,18 @@ export async function runProjectCollaboration(
         { type: 'text', text: promptText }
       ]
 
+      const thinkingOpts = resolveThinking('deep')
       const response = await fetchAnthropicWithTimeout({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 4000,
-          system: getSystemPrompt(agent, cumulativeContext),
-          messages: [{ role: 'user', content: userContent }],
-        }, { signal: options?.signal, timeoutMs: options?.timeoutMs ?? 120000 })
+        model: resolveModel('deep'),
+        max_tokens: resolveMaxTokens('deep'),
+        ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
+        system: getSystemPrompt(agent, cumulativeContext),
+        messages: [{ role: 'user', content: userContent }],
+      }, { signal: options?.signal, timeoutMs: options?.timeoutMs ?? 240000 })
 
       const data = await response.json()
       if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-      const result = data.content[0]?.text || ''
+      const result = extractText(data)
 
       const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|<!--XYNAPS_HTML-->|$)/)
       const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
@@ -1239,16 +1363,18 @@ ${reportsText}
   ]
 
   try {
+    const thinkingFinal = resolveThinking('deep')
     const response = await fetchAnthropicWithTimeout({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 4000,
+      model: resolveModel('deep'),
+      max_tokens: resolveMaxTokens('deep'),
+      ...(thinkingFinal ? { thinking: thinkingFinal } : {}),
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
-    }, { timeoutMs: 120000 })
+    }, { timeoutMs: 240000 })
 
     const data = await response.json()
     if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-    const text: string = data.content[0]?.text || ''
+    const text: string = extractText(data)
 
     // JSON 파싱 — 1차 직접 파싱, 실패 시 2차 엄격 JSON 복구, 그래도 실패하면 태그 포맷 재생성
     let parsed: { sections?: Array<{ title?: string; steps?: unknown[] }> }
@@ -1363,16 +1489,12 @@ HTML 없이 일반 텍스트로만 응답하세요.
       })
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(resolveEndpoint(), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: resolveApiHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 1000,
+        model: resolveModel('fast'),
+        max_tokens: resolveMaxTokens('fast'),
         system: systemPrompt,
         messages,
       }),
@@ -1380,7 +1502,7 @@ HTML 없이 일반 텍스트로만 응답하세요.
 
     const data = await response.json()
     if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-    const text: string = data.content[0]?.text || ''
+    const text: string = extractText(data)
     responses.push(`[${agentDef.emoji} ${agentDef.name}]\n${text}`)
   }
 

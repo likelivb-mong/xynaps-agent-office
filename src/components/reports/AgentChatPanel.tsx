@@ -5,6 +5,7 @@ import { chatWithAgent, regenerateAgentDetail } from '../../lib/api'
 import type { AgentReport as AR } from '../../types'
 import { Spinner, WriteIcon, ChevronUpIcon } from '../ui/Icon'
 import { AgentIcon } from '../ui/AgentIcon'
+import { useCostConfirm } from '../ui/CostConfirmModal'
 
 interface Props {
   report: AgentReport
@@ -20,6 +21,7 @@ export function AgentChatPanel({ report, projectContext, previousReports, onNewV
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+  const { requireConfirm, modal: costConfirmModal } = useCostConfirm()
   const messageListRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -66,8 +68,12 @@ export function AgentChatPanel({ report, projectContext, previousReports, onNewV
     }
   }
 
-  async function handleRegenerate() {
+  function handleRegenerate() {
     if (regenerating || sending) return
+    requireConfirm('regenerate', () => _doRegenerate())
+  }
+
+  async function _doRegenerate() {
     setRegenerating(true)
     try {
       const { summary, detail } = await regenerateAgentDetail(
@@ -281,6 +287,7 @@ export function AgentChatPanel({ report, projectContext, previousReports, onNewV
           <ChevronUpIcon width={14} height={14} />
         </button>
       </div>
+      {costConfirmModal}
     </div>
   )
 }
