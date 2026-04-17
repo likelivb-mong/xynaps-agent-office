@@ -1,5 +1,5 @@
 import type { Project } from '../types'
-import { saveProject } from '../lib/storage'
+import { saveProject, moveProjectToTrash } from '../lib/storage'
 
 const SAMPLE_PROJECT_ID = 'xynaps-sample-project-2024'
 
@@ -871,6 +871,18 @@ X-KIT 3대·자물쇠 6개·전자장치 2대 구성. 예산 약 180만원.
 }
 
 export function seedSampleProject() {
-  // Always overwrite the sample project so pin coordinates and updates stay fresh
   saveProject(sampleProject)
+}
+
+export function removeSampleProject() {
+  try {
+    const raw = localStorage.getItem('xynaps_v2_projects')
+    if (!raw) return
+    const projects: Project[] = JSON.parse(raw)
+    if (projects.some(p => p.id === SAMPLE_PROJECT_ID)) {
+      moveProjectToTrash(SAMPLE_PROJECT_ID)
+    }
+  } catch {
+    // ignore
+  }
 }
