@@ -125,6 +125,7 @@ export function ProjectPage() {
   const [activeTab, setActiveTab] = useState<'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop'>('reports')
   const [gameflowView, setGameflowView] = useState<'table' | 'map' | 'user' | 'script'>('table')
   const [generatingGameFlow, setGeneratingGameFlow] = useState(false)
+  const [gameFlowElapsed, setGameFlowElapsed] = useState(0)
   const [gameFlowError, setGameFlowError] = useState<string | null>(null)
   const [gameFlowSyncedAt, setGameFlowSyncedAt] = useState<string | null>(null)
   const [workspaceSaveStatus, setWorkspaceSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -345,6 +346,11 @@ export function ProjectPage() {
     if (!project || !activeVersion) return
     if (running || generatingFinal) return
     if (isSingleAgentRunning(project.id, agentId)) return
+    requireConfirm('single-agent-refresh', () => _doRefreshSingleAgent(agentId))
+  }
+
+  function _doRefreshSingleAgent(agentId: AgentId) {
+    if (!project || !activeVersion) return
     setRefreshingAgents(prev => new Set(prev).add(agentId))
     try {
       rerunSingleAgent(project.id, activeVersion.id, agentId)
@@ -418,6 +424,7 @@ export function ProjectPage() {
   async function _doGenerateGameFlow() {
     if (!project || !activeVersion) return
     setGeneratingGameFlow(true)
+    setGameFlowElapsed(0)
     setGameFlowError(null)
     try {
       // Resolve each report to its active version's content
@@ -722,6 +729,12 @@ export function ProjectPage() {
     const timer = window.setInterval(() => setProgressClock(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [running, generatingFinal])
+
+  useEffect(() => {
+    if (!generatingGameFlow) return
+    const timer = window.setInterval(() => setGameFlowElapsed(s => s + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [generatingGameFlow])
 
   if (!project) return null
 
@@ -2108,12 +2121,24 @@ export function ProjectPage() {
                     <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
                       <Spinner size={32} color="var(--accent)" />
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>
                       에이전트 보고서를 게임 플로우에 반영하는 중...
                     </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
                       보고서를 분석하여 섹션·단계별 게임 플로우를 구조화합니다
                     </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', marginBottom: 16 }}>
+                      경과 시간 {formatDuration(gameFlowElapsed)}
+                    </div>
+                    <div style={{ width: 240, height: 3, background: 'var(--bg-secondary)', borderRadius: 99, margin: '0 auto', overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 99,
+                        background: 'var(--accent)',
+                        animation: 'gameflow-progress 2s ease-in-out infinite',
+                        width: '40%',
+                      }} />
+                    </div>
+                    <style>{`@keyframes gameflow-progress { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }`}</style>
                   </>
                 ) : (
                   <>

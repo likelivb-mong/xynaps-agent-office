@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
+import { marked } from 'marked'
 import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
 import { AGENTS } from '../../data/agents'
 import { AgentChatPanel } from './AgentChatPanel'
@@ -17,6 +18,10 @@ interface Props {
   onRetryFromHere?: () => void
   onRefresh?: () => void
   isRefreshing?: boolean
+}
+
+function isMarkdown(text: string): boolean {
+  return /^#{1,6}\s|^\s*[-*]\s|\*\*[^*]+\*\*|^\s*>\s|^\|.+\||\n#{1,6}\s/m.test(text)
 }
 
 function extractHtml(detail: string): { html: string | null; plain: string } {
@@ -69,6 +74,13 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
     ? extractHtml(displayDetail)
     : { html: null, plain: '' }
   const editableDetail = (detailPlain || displayDetail || '').trim()
+
+  const markdownHtml = useMemo(() => {
+    if (detailHtml) return null
+    const text = detailPlain || displayDetail || ''
+    if (!text || !isMarkdown(text)) return null
+    try { return marked.parse(text) as string } catch { return null }
+  }, [detailHtml, detailPlain, displayDetail])
 
   const chatCount = Math.floor((report.chatHistory?.length ?? 0) / 2)
 
@@ -384,6 +396,8 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                     />
                   ) : detailHtml ? (
                     <div data-report-html style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)', overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: stripOperatingBudgetSectionHtml(detailHtml) }} />
+                  ) : markdownHtml ? (
+                    <div data-report-html style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)', overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: markdownHtml }} />
                   ) : (
                     <div style={{
                       fontSize: 12.5,
