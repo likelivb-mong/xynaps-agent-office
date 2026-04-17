@@ -186,6 +186,14 @@ export async function listGoogleDriveFolderMetadata(folderId: string, oauthToken
   return out
 }
 
+function filterBinaryForMaxMode(blocks: unknown[]): unknown[] {
+  if (!isMaxMode()) return blocks
+  return blocks.filter((b: unknown) => {
+    const type = (b as { type?: string }).type
+    return type !== 'image' && type !== 'document'
+  })
+}
+
 function buildFileContent(files: SkillFile[]) {
   const blocks: unknown[] = []
   for (const f of files) {
@@ -577,7 +585,7 @@ export async function generateDraftCrimeConfigFromFiles(
   currentCrimeConfig: CrimeConfig | undefined,
   attachments: SkillFile[],
 ): Promise<CrimeConfig> {
-  const fileContent = buildFileContent(attachments ?? [])
+  const fileContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
   const currentContext = currentCrimeConfig ? buildCrimeContext(currentCrimeConfig) : '현재 사건 설정 없음'
   const system = `당신은 방탈출/크라임씬 기획 PM입니다.
 첨부 문서를 읽고 사건수사 설정 초안을 JSON으로만 반환하세요.
@@ -834,7 +842,7 @@ export async function callAgent(
   options?: { signal?: AbortSignal; timeoutMs?: number; mode?: 'fast' | 'deep' }
 ): Promise<string> {
   const mode = options?.mode ?? 'deep'
-  const skillContent = buildFileContent(agent.skills)
+  const skillContent = filterBinaryForMaxMode(buildFileContent(agent.skills))
   const userContent: unknown[] = [
     ...skillContent,
     { type: 'text', text: userMessage }
@@ -894,7 +902,7 @@ export async function analyzeSkillFile(
   skill: SkillFile,
 ): Promise<string> {
   const agentDef = AGENTS.find(a => a.id === agentId)!
-  const fileContent = buildFileContent([skill])
+  const fileContent = filterBinaryForMaxMode(buildFileContent([skill]))
   if (fileContent.length === 0) return ''
 
   const systemPrompt = `당신은 ${agentDef.emoji} ${agentDef.name}입니다. 역할: ${agentDef.role}
@@ -1117,7 +1125,7 @@ export async function runProjectCollaboration(
   cumulativeContext += systemTypeCtx
 
   // 첨부파일 (도면 포함)
-  const attachmentContent = buildFileContent(attachments ?? [])
+  const attachmentContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
 
   const baseOrder: AgentId[] = ['ceo', 'concept', 'pd', 'puzzle', 'space', 'ops']
   const extraOrder: AgentId[] = []
@@ -1159,7 +1167,7 @@ export async function runProjectCollaboration(
     try {
       // 첫 에이전트에게만 첨부파일 포함 (컨텍스트 공유)
       const useAttachments = agentId === 'ceo' && attachmentContent.length > 0
-      const skillContent = buildFileContent(agent.skills)
+      const skillContent = filterBinaryForMaxMode(buildFileContent(agent.skills))
       const userContent: unknown[] = [
         ...(useAttachments ? attachmentContent : []),
         ...skillContent,
@@ -1260,7 +1268,7 @@ ${reportsText}
 - 각 에이전트별 카드: 역할명 + 핵심 결론 1~2줄
 - background:#1e293b; border:1px solid #334155; border-radius:8px; padding:12px`
 
-  const skillContent = buildFileContent(pdAgent.skills)
+  const skillContent = filterBinaryForMaxMode(buildFileContent(pdAgent.skills))
   const response = await fetchAnthropicWithTimeout({
     model: MODEL_FAST,
     max_tokens: 3500,
@@ -1293,7 +1301,7 @@ export async function compileGameFlow(
   ).join('\n\n')
 
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
-  const attachmentContent = buildFileContent(attachments ?? [])
+  const attachmentContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
 
   const systemPrompt = `당신은 방탈출 게임 플로우 시트 전문가입니다.
 6개 에이전트의 기획 결과를 바탕으로 실제 게임 플로우 시트를 JSON 형식으로 작성합니다.
