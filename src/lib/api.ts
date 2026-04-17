@@ -1557,6 +1557,53 @@ ${reportsText}
   }
 }
 
+export async function compileAudioScript(soundReportText: string): Promise<import('../types').AudioScript> {
+  try {
+    const response = await fetchAnthropicWithTimeout({
+      model: MODEL_FAST,
+      max_tokens: 8000,
+      system: '오디오 스크립트를 JSON으로 변환합니다. 유효한 JSON만 반환하세요.',
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: `다음 음향 보고서 텍스트를 AudioScript JSON 형식으로 변환해주세요.\n\n반환 형식:\n{\n  "tracks": [\n    {\n      "trackNum": 1,\n      "title": "트랙 제목",\n      "timeStart": "00:00",\n      "timeEnd": "01:30",\n      "rows": [\n        { "kind": "line", "channel": "L+R", "content": "내용" },\n        { "kind": "cue", "content": "큐 마커 메모" }\n      ]\n    }\n  ]\n}\n\n유효한 channel 값: "L", "R", "C", "L+R", "SFX", "전환"\n유효한 kind 값: "line", "cue"\n\n음향 보고서:\n${soundReportText}`,
+        }],
+      }],
+    }, { timeoutMs: 300000 })
+
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error?.message || 'AudioScript 생성 API 오류')
+    const text: string = extractText(data)
+
+    const parsed = parseModelJsonResponse(text) as { tracks?: Array<{
+      trackNum?: number
+      title?: string
+      timeStart?: string
+      timeEnd?: string
+      rows?: Array<{ kind?: string; channel?: string; content?: string }>
+    }> }
+
+    const tracks: import('../types').AudioScriptTrack[] = (parsed.tracks ?? []).map(t => ({
+      id: crypto.randomUUID(),
+      trackNum: t.trackNum ?? 1,
+      title: String(t.title ?? '').trim(),
+      timeStart: String(t.timeStart ?? '00:00').trim(),
+      timeEnd: String(t.timeEnd ?? '00:00').trim(),
+      rows: (t.rows ?? []).map(r => ({
+        id: crypto.randomUUID(),
+        kind: (r.kind === 'cue' ? 'cue' : 'line') as import('../types').AudioRowKind,
+        channel: r.channel as import('../types').AudioChannel | undefined,
+        content: String(r.content ?? '').trim(),
+      })),
+    }))
+
+    return { tracks, generatedAt: new Date().toISOString() }
+  } catch (error) {
+    throw toReadableApiError(error, 'AudioScript 생성에 실패했습니다.')
+  }
+}
+
 // ── 회의실 멀티 에이전트 채팅 ──────────────────────────────────────────────────
 
 export async function chatWorkshopMultiAgent(
