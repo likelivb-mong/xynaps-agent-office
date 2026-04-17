@@ -23,45 +23,46 @@ const QUALITY_DIRECTIVE = `
 
 // ── Settings-aware model resolution ────────────────────────────────────────────
 
-type ModelTier = '절약' | '균형' | '최고' | 'Max구독연결'
+type ModelQuality = '절약' | '균형' | '최고'
 const SETTINGS_KEY = 'xynaps_v2_settings'
 
-function getTier(): ModelTier {
-  try { return (JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').modelTier ?? '균형') as ModelTier }
+function getQuality(): ModelQuality {
+  try { return (JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').modelQuality ?? '균형') as ModelQuality }
   catch { return '균형' }
 }
 
+function isMaxMode(): boolean {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').useMax === true }
+  catch { return false }
+}
+
 function resolveModel(purpose: 'fast' | 'deep'): string {
-  const tier = getTier()
-  if (tier === '절약') return MODEL_FAST
-  if (tier === '균형') return purpose === 'deep' ? MODEL_DEEP : MODEL_FAST
-  return MODEL_DEEP // 최고 or Max구독연결 → always deep
+  const q = getQuality()
+  if (q === '절약') return MODEL_FAST
+  if (q === '균형') return purpose === 'deep' ? MODEL_DEEP : MODEL_FAST
+  return MODEL_DEEP
 }
 
 function resolveThinking(purpose: 'fast' | 'deep'): typeof THINKING_DEEP | undefined {
-  const tier = getTier()
-  if (tier === '절약') return undefined
-  if (tier === '균형') return purpose === 'deep' ? THINKING_LIGHT : undefined
-  if (tier === '최고') return purpose === 'deep' ? THINKING_HEAVY : THINKING_DEEP
-  return undefined // Max구독연결: local server decides
+  if (isMaxMode()) return undefined // local server handles model/thinking internally
+  const q = getQuality()
+  if (q === '절약') return undefined
+  if (q === '균형') return purpose === 'deep' ? THINKING_LIGHT : undefined
+  return purpose === 'deep' ? THINKING_HEAVY : THINKING_DEEP
 }
 
 function resolveMaxTokens(purpose: 'fast' | 'deep'): number {
-  const tier = getTier()
+  const q = getQuality()
   const thinkingBudget = resolveThinking(purpose)?.budget_tokens ?? 0
   let tokens: number
-  if (tier === '절약') tokens = purpose === 'deep' ? 3000 : 1500
-  else if (tier === '균형') tokens = purpose === 'deep' ? 16000 : 3000
+  if (q === '절약') tokens = purpose === 'deep' ? 3000 : 1500
+  else if (q === '균형') tokens = purpose === 'deep' ? 16000 : 3000
   else tokens = purpose === 'deep' ? 24000 : 8000
-  // max_tokens must exceed thinking budget
   return Math.max(tokens, thinkingBudget + 2000)
 }
 
 function resolveApiHeaders(): Record<string, string> {
-  const tier = getTier()
-  if (tier === 'Max구독연결') {
-    return { 'Content-Type': 'application/json' }
-  }
+  if (isMaxMode()) return { 'Content-Type': 'application/json' }
   return {
     'Content-Type': 'application/json',
     'x-api-key': API_KEY,
@@ -71,7 +72,7 @@ function resolveApiHeaders(): Record<string, string> {
 }
 
 function resolveEndpoint(): string {
-  return getTier() === 'Max구독연결'
+  return isMaxMode()
     ? 'http://localhost:3001/api/messages'
     : 'https://api.anthropic.com/v1/messages'
 }
@@ -83,15 +84,15 @@ function extractText(data: { content?: Array<{ type: string; text?: string }> })
 export type CostActionType = 'full-collaboration' | 'rerun-from-agent' | 'game-flow' | 'regenerate'
 
 export function getEstimatedCost(action: CostActionType): string | null {
-  const tier = getTier()
-  if (tier === 'Max구독연결') return null
-  const costs: Record<CostActionType, Record<ModelTier, string>> = {
-    'full-collaboration': { '절약': '약 2,000~4,000원', '균형': '약 14,000~20,000원', '최고': '약 32,000~45,000원', 'Max구독연결': '' },
-    'rerun-from-agent':   { '절약': '약 300~500원',    '균형': '약 1,800~2,500원',    '최고': '약 4,000~6,000원',    'Max구독연결': '' },
-    'game-flow':          { '절약': '약 200~400원',    '균형': '약 700~1,500원',      '최고': '약 2,000~4,000원',    'Max구독연결': '' },
-    'regenerate':         { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원',    'Max구독연결': '' },
+  if (isMaxMode()) return null
+  const q = getQuality()
+  const costs: Record<CostActionType, Record<ModelQuality, string>> = {
+    'full-collaboration': { '절약': '약 2,000~4,000원', '균형': '약 14,000~20,000원', '최고': '약 32,000~45,000원' },
+    'rerun-from-agent':   { '절약': '약 300~500원',    '균형': '약 1,800~2,500원',    '최고': '약 4,000~6,000원' },
+    'game-flow':          { '절약': '약 200~400원',    '균형': '약 700~1,500원',      '최고': '약 2,000~4,000원' },
+    'regenerate':         { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
   }
-  return costs[action][tier]
+  return costs[action][q]
 }
 
 export interface GoogleDriveFileMeta {
