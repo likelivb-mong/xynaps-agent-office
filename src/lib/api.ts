@@ -81,16 +81,17 @@ function extractText(data: { content?: Array<{ type: string; text?: string }> })
   return data.content?.find(b => b.type === 'text')?.text ?? ''
 }
 
-export type CostActionType = 'full-collaboration' | 'rerun-from-agent' | 'game-flow' | 'regenerate'
+export type CostActionType = 'full-collaboration' | 'rerun-from-agent' | 'game-flow' | 'regenerate' | 'single-agent-refresh'
 
 export function getEstimatedCost(action: CostActionType): string | null {
   if (isMaxMode()) return null
   const q = getQuality()
   const costs: Record<CostActionType, Record<ModelQuality, string>> = {
-    'full-collaboration': { '절약': '약 2,000~4,000원', '균형': '약 14,000~20,000원', '최고': '약 32,000~45,000원' },
-    'rerun-from-agent':   { '절약': '약 300~500원',    '균형': '약 1,800~2,500원',    '최고': '약 4,000~6,000원' },
-    'game-flow':          { '절약': '약 200~400원',    '균형': '약 700~1,500원',      '최고': '약 2,000~4,000원' },
-    'regenerate':         { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
+    'full-collaboration':    { '절약': '약 2,000~4,000원', '균형': '약 14,000~20,000원', '최고': '약 32,000~45,000원' },
+    'rerun-from-agent':      { '절약': '약 300~500원',    '균형': '약 1,800~2,500원',    '최고': '약 4,000~6,000원' },
+    'game-flow':             { '절약': '약 200~400원',    '균형': '약 700~1,500원',      '최고': '약 2,000~4,000원' },
+    'regenerate':            { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
+    'single-agent-refresh':  { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
   }
   return costs[action][q]
 }

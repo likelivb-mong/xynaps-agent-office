@@ -19,6 +19,10 @@ const ACTION_LABELS: Record<CostActionType, { title: string; desc: string }> = {
     title: '보고서 업데이트',
     desc: '회의 내용을 반영해 이 에이전트의 보고서를 재작성합니다.',
   },
+  'single-agent-refresh': {
+    title: '에이전트 재실행',
+    desc: '이 에이전트만 다시 실행합니다. 기존 보고서가 교체됩니다.',
+  },
 }
 
 function getTierLabel() {
@@ -42,12 +46,6 @@ export function useCostConfirm(): UseCostConfirmReturn {
   const [pending, setPending] = useState<PendingAction | null>(null)
 
   const requireConfirm = useCallback((type: CostActionType, onConfirmed: () => void) => {
-    const cost = getEstimatedCost(type)
-    if (cost === null) {
-      // Max구독연결 or free — skip confirmation
-      onConfirmed()
-      return
-    }
     setPending({ type, onConfirmed })
   }, [])
 
@@ -105,45 +103,58 @@ function CostConfirmModal({ actionType, onConfirm, onCancel }: CostConfirmModalP
         <div style={{ marginBottom: 20 }}>
           <div style={{
             fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
-            color: '#f59e0b', marginBottom: 8,
+            color: cost ? '#f59e0b' : '#818cf8', marginBottom: 8,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            <span>⚠</span> API 크레딧 사용 확인
+            <span>{cost ? '⚠' : '▶'}</span> {cost ? 'API 크레딧 사용 확인' : '실행 확인'}
           </div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0' }}>{title}</div>
           <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4, lineHeight: 1.5 }}>{desc}</div>
         </div>
 
         {/* Cost card */}
-        <div style={{
-          background: '#1e2330',
-          border: '1px solid #2f3447',
-          borderRadius: 10,
-          padding: '14px 16px',
-          marginBottom: 24,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.08em' }}>
-                현재 AI 품질 설정
-              </div>
-              <div style={{ fontSize: 14, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>{tier}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.08em' }}>
-                예상 API 비용
-              </div>
-              <div style={{ fontSize: 16, color: '#f59e0b', fontWeight: 700, marginTop: 2 }}>{cost}</div>
-            </div>
-          </div>
+        {cost ? (
           <div style={{
-            fontSize: 11, color: '#475569', marginTop: 10, lineHeight: 1.5,
-            borderTop: '1px solid #2f3447', paddingTop: 10,
+            background: '#1e2330',
+            border: '1px solid #2f3447',
+            borderRadius: 10,
+            padding: '14px 16px',
+            marginBottom: 24,
           }}>
-            스킬 파일 크기에 따라 비용이 달라질 수 있습니다.
-            비용 없이 사용하려면 설정에서 <strong style={{ color: '#818cf8' }}>Max구독연결</strong>로 변경하세요.
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.08em' }}>
+                  현재 AI 품질 설정
+                </div>
+                <div style={{ fontSize: 14, color: '#e2e8f0', fontWeight: 600, marginTop: 2 }}>{tier}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.08em' }}>
+                  예상 API 비용
+                </div>
+                <div style={{ fontSize: 16, color: '#f59e0b', fontWeight: 700, marginTop: 2 }}>{cost}</div>
+              </div>
+            </div>
+            <div style={{
+              fontSize: 11, color: '#475569', marginTop: 10, lineHeight: 1.5,
+              borderTop: '1px solid #2f3447', paddingTop: 10,
+            }}>
+              스킬 파일 크기에 따라 비용이 달라질 수 있습니다.
+              비용 없이 사용하려면 설정에서 <strong style={{ color: '#818cf8' }}>Max구독연결</strong>로 변경하세요.
+            </div>
           </div>
-        </div>
+        ) : (
+          <div style={{
+            background: '#1e2330',
+            border: '1px solid #2f3447',
+            borderRadius: 10,
+            padding: '14px 16px',
+            marginBottom: 24,
+            fontSize: 13, color: '#94a3b8', lineHeight: 1.5,
+          }}>
+            실행하면 기존 결과가 교체됩니다. 계속 진행할까요?
+          </div>
+        )}
 
         {/* Buttons */}
         <div style={{ display: 'flex', gap: 10 }}>
