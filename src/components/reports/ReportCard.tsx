@@ -10,6 +10,7 @@ interface Props {
   report: AgentReport
   onNewVersion: (agentId: string, chatHistory: ChatMessage[], newVersion: DetailVersion) => void
   onChatSave: (agentId: string, chatHistory: ChatMessage[]) => void
+  onDeleteVersion?: (agentId: string, versionId: string) => void
   projectContext: string
   previousReports: AgentReport[]
   isRunning?: boolean
@@ -53,7 +54,7 @@ function stripOperatingBudgetSectionHtml(input: string): string {
 }
 
 
-export function ReportCard({ report, onNewVersion, onChatSave, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
+export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
   const [showDetail, setShowDetail] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -324,6 +325,25 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                   {activeVersion?.label ?? '원본'}{' '}
                   <span style={{ opacity: 0.45 }}>({activeVersionIdx + 1}/{versions.length})</span>
                 </span>
+                {activeVersion && activeVersion.id !== 'original' && onDeleteVersion && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`"${activeVersion.label}" 버전을 삭제할까요?`)) {
+                        onDeleteVersion(report.agentId, activeVersion.id)
+                      }
+                    }}
+                    title="이 버전 삭제"
+                    style={{
+                      width: 22, height: 22, padding: 0, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 5, border: 'none',
+                      background: 'transparent', color: '#f87171',
+                      cursor: 'pointer', fontSize: 14, lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
                 <button
                   onClick={() => navigateVersion(1)}
                   disabled={activeVersionIdx >= versions.length - 1}
@@ -387,7 +407,7 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                     }}
                   />
                 ) : summaryMarkdownHtml ? (
-                  <div data-report-html style={{ fontSize: 13, lineHeight: 1.72, color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: summaryMarkdownHtml }} />
+                  <div data-report-summary style={{ fontSize: 13, lineHeight: 1.72, color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: summaryMarkdownHtml }} />
                 ) : normalizedSummary}
                 {!isEditing && (() => {
                   const isFailed = (report.summary ?? '').includes('오류')
