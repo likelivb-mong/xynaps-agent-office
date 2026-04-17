@@ -286,7 +286,7 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
         const ceoAgent = AGENTS.find(agent => agent.id === 'ceo')!
         const final = await runFinalReport(freshProject.name, normalizedReports, { ...ceoAgent, skills: getAllSkills().ceo || [] }, {
           signal: abortController.signal,
-          timeoutMs: 300000,
+          timeoutMs: 90000,
         })
         const finalReport: FinalReport = { ...final, createdAt: new Date().toISOString() }
         updateVersionReports(project.id, version.id, normalizedReports, finalReport)
@@ -484,7 +484,7 @@ export function rerunFinalReportOnly(projectId: string, versionId: string): { al
       const ceoAgent = AGENTS.find(a => a.id === 'ceo')!
       const final = await runFinalReport(project.name, existingReports, { ...ceoAgent, skills: getAllSkills().ceo || [] }, {
         signal: abortController.signal,
-        timeoutMs: 300000,
+        timeoutMs: 90000,
       })
       const finalReport: FinalReport = { ...final, createdAt: new Date().toISOString() }
       updateVersionReports(projectId, version.id, existingReports, finalReport)
