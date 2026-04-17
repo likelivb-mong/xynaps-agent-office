@@ -748,7 +748,7 @@ ${currentContext}
     max_tokens: resolveMaxTokens('fast'),
     system,
     messages: [{ role: 'user', content }],
-  }, { timeoutMs: 120000 })
+  }, { timeoutMs: 300000 })
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '외부 파일 반영 실패')
   const text: string = extractText(data)
