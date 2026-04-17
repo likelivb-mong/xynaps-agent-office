@@ -63,10 +63,15 @@ app.post('/api/messages', async (req, res) => {
     ? `<system>\n${systemPrompt}\n</system>\n\n${userText}`
     : userText
 
-  callClaudeCli(fullPrompt, res)
+  const wantStream = body.stream === true
+  if (wantStream) {
+    callClaudeCliStream(fullPrompt, res)
+  } else {
+    callClaudeCli(fullPrompt, res)
+  }
 })
 
-// ── claude CLI subprocess ───────────────────────────────────────────────────
+// ── claude CLI subprocess (non-streaming) ───────────────────────────────────
 function callClaudeCli(prompt, res) {
   const chunks = []
   const errChunks = []
@@ -121,6 +126,69 @@ function callClaudeCli(prompt, res) {
       })
     } else {
       res.status(500).json({ error: { message: err.message } })
+    }
+  })
+}
+
+// ── claude CLI subprocess (SSE streaming) ───────────────────────────────────
+function callClaudeCliStream(prompt, res) {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  const errChunks = []
+  let settled = false
+
+  const proc = spawn('claude', ['-p', '--output-format', 'text'], {
+    env: process.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  proc.stdin.write(prompt)
+  proc.stdin.end()
+
+  const killTimer = setTimeout(() => {
+    if (settled) return
+    settled = true
+    proc.kill()
+    res.write(`data: ${JSON.stringify({ type: 'error', message: 'Claude CLI 응답 시간이 초과되었습니다 (15분). 다시 시도해주세요.' })}\n\n`)
+    res.end()
+  }, 900000)
+
+  proc.stdout.on('data', chunk => {
+    res.write(`data: ${JSON.stringify({ type: 'delta', text: chunk.toString() })}\n\n`)
+  })
+
+  proc.stderr.on('data', d => errChunks.push(d))
+
+  proc.on('close', code => {
+    clearTimeout(killTimer)
+    if (settled) return
+    settled = true
+    if (code !== 0) {
+      const errMsg = Buffer.concat(errChunks).toString().trim()
+      res.write(`data: ${JSON.stringify({ type: 'error', message: `Claude CLI 오류 (exit ${code}): ${errMsg || '알 수 없는 오류'}` })}\n\n`)
+    } else {
+      res.write('data: [DONE]\n\n')
+    }
+    res.end()
+  })
+
+  proc.on('error', err => {
+    clearTimeout(killTimer)
+    if (settled) return
+    settled = true
+    const message = err.code === 'ENOENT'
+      ? 'claude CLI를 찾을 수 없습니다. Claude Code(https://claude.ai/code)가 설치되어 있고 PATH에 있는지 확인해주세요.'
+      : err.message
+    res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`)
+    res.end()
+  })
+
+  res.on('close', () => {
+    if (!settled) {
+      settled = true
+      clearTimeout(killTimer)
+      proc.kill()
     }
   })
 }
