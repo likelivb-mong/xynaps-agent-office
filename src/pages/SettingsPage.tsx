@@ -213,7 +213,7 @@ export function SettingsPage() {
               }}>
                 <strong>서버 시작 방법:</strong><br />
                 <code style={{ background: '#0f1117', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
-                  cd server && npm install && node index.js
+                  cd ~/Downloads/xynaps-agent-office-v2/server && npm install && node index.js
                 </code>
               </div>
             )}
