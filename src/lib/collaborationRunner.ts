@@ -578,7 +578,7 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
     finalReport: current?.finalReport ?? version.finalReport ?? null,
     error: null,
     logs: [
-      { id: crypto.randomUUID(), at: startedAt, level: 'info', message: `${AGENTS.find(a => a.id === agentId)?.name ?? agentId} 단독 재실행을 시작합니다.` },
+      { id: crypto.randomUUID(), at: startedAt, level: 'info' as const, message: `${AGENTS.find(a => a.id === agentId)?.name ?? agentId} 단독 재실행을 시작합니다.` },
       ...(current?.logs ?? []),
     ].slice(0, 24),
   })
