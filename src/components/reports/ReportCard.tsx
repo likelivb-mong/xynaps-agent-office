@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { marked } from 'marked'
 import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
 import { AGENTS } from '../../data/agents'
@@ -50,6 +50,84 @@ function stripOperatingBudgetSectionHtml(input: string): string {
     .replace(/<h[1-6][^>]*>[^<]*운영\s*예산[^<]*<\/h[1-6]>[\s\S]*?(?=<h[1-6][^>]*>|$)/gi, '')
     .replace(/<p[^>]*>\s*(?:0?7[\.\)\-:\s]*)?운영\s*예산[^<]*<\/p>[\s\S]*?(?=<h[1-6][^>]*>|$)/gi, '')
     .trim()
+}
+
+function LiveStreamPanel({ liveText }: { liveText?: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [liveText])
+
+  return (
+    <div style={{
+      position: 'relative',
+      overflow: 'hidden',
+      borderTop: '1px solid var(--border)',
+      padding: '14px 16px 16px',
+      background: 'linear-gradient(180deg, rgba(111,255,163,0.05), rgba(111,255,163,0.015) 60%, transparent 100%)',
+    }}>
+      <div
+        className="project-working-scan"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(180deg, transparent 0%, rgba(201,255,84,0.12) 45%, transparent 100%)',
+          pointerEvents: 'none',
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="project-working-led" style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: '#c9ff54', boxShadow: '0 0 12px rgba(201,255,84,0.7)',
+          }} />
+          <span style={{ fontSize: 12, fontWeight: 800, color: '#efffb8', letterSpacing: '0.06em' }}>
+            AI WORKING MODE
+          </span>
+        </div>
+        <span style={{ fontSize: 11, color: 'rgba(239,255,184,0.82)', fontWeight: 700 }}>LIVE</span>
+      </div>
+      <div
+        ref={scrollRef}
+        style={{
+          position: 'relative',
+          height: liveText ? 220 : 80,
+          overflowY: 'auto',
+          border: '1px solid rgba(201,255,84,0.16)',
+          borderRadius: 12,
+          background: 'rgba(0,0,0,0.25)',
+          padding: '10px 12px',
+          transition: 'height 0.3s',
+        }}
+      >
+        {liveText ? (
+          <pre style={{
+            margin: 0,
+            fontSize: 11,
+            color: 'rgba(230,255,200,0.82)',
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: 'inherit',
+          }}>
+            {liveText}
+          </pre>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {['프로젝트 맥락 로드', '브리핑 컨텍스트 병합', '에이전트 역할 프롬프트 생성', '초안 요약 및 상세 보고서 작성'].map((line, i) => (
+              <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: i < 3 ? '#dfe8f8' : 'var(--text-muted)' }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: i < 3 ? '#c9ff54' : 'rgba(148,163,184,0.5)', flexShrink: 0 }} />
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export function ReportCard({ report, onNewVersion, onChatSave, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
@@ -544,97 +622,7 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
       )}
 
       {isRunning && (
-        <div style={{
-          position: 'relative',
-          overflow: 'hidden',
-          borderTop: '1px solid var(--border)',
-          padding: '14px 16px 16px',
-          background: 'linear-gradient(180deg, rgba(111,255,163,0.05), rgba(111,255,163,0.015) 60%, transparent 100%)',
-        }}>
-          <div
-            className="project-working-scan"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'linear-gradient(180deg, transparent 0%, rgba(201,255,84,0.12) 45%, transparent 100%)',
-              pointerEvents: 'none',
-            }}
-          />
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="project-working-led" style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                background: '#c9ff54',
-                boxShadow: '0 0 12px rgba(201,255,84,0.7)',
-              }} />
-              <span style={{ fontSize: 12, fontWeight: 800, color: '#efffb8', letterSpacing: '0.06em' }}>
-                AI WORKING MODE
-              </span>
-            </div>
-            <span style={{ fontSize: 11, color: 'rgba(239,255,184,0.82)', fontWeight: 700 }}>
-              LIVE
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 12, position: 'relative' }}>
-            <div style={{
-              border: '1px solid rgba(201,255,84,0.16)',
-              borderRadius: 12,
-              background: 'rgba(255,255,255,0.02)',
-              padding: '12px 12px 10px',
-            }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>현재 처리 중</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
-                기획 문맥 정리 및 보고서 초안 생성
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {[
-                  '프로젝트 맥락 로드',
-                  '브리핑 컨텍스트 병합',
-                  '에이전트 역할 프롬프트 생성',
-                  '초안 요약 및 상세 보고서 작성',
-                ].map((line, index) => (
-                  <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: index < 3 ? '#dfe8f8' : 'var(--text-muted)' }}>
-                    <span style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: '50%',
-                      background: index < 3 ? '#c9ff54' : 'rgba(148,163,184,0.5)',
-                    }} />
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{
-              border: '1px solid rgba(120,148,255,0.14)',
-              borderRadius: 12,
-              background: 'rgba(255,255,255,0.018)',
-              padding: '12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 7,
-            }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>실행 상태</div>
-              <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 700 }}>모델 응답 대기 및 초안 조합</div>
-              <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                <div
-                  className="project-working-progress"
-                  style={{
-                    height: '100%',
-                    width: '58%',
-                    borderRadius: 999,
-                    background: 'linear-gradient(90deg, #c9ff54 0%, #8ce8ff 100%)',
-                  }}
-                />
-              </div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                에이전트 역할에 맞춰 구조화된 기획안 초안을 생성하고 있습니다.
-              </div>
-            </div>
-          </div>
-        </div>
+        <LiveStreamPanel liveText={report.detail} />
       )}
     </div>
   )
