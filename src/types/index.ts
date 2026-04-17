@@ -43,7 +43,7 @@ export interface SkillFile {
   id: string
   name: string
   type: 'pdf' | 'image' | 'text' | 'markdown'
-  url: string
+  url?: string
   relativePath?: string
   base64?: string
   mediaType?: string
