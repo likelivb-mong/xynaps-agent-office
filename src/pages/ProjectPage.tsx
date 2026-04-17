@@ -2183,7 +2183,7 @@ export function ProjectPage() {
                     </div>
                   )
                 })()
-                ) : (
+                : (
                   <>
                     <div style={{ fontSize: 40, marginBottom: 16, opacity: 0.25 }}>◈</div>
                     <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>게임 플로우 미생성</div>
