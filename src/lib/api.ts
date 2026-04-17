@@ -39,16 +39,16 @@ function isMaxMode(): boolean {
 function resolveModel(purpose: 'fast' | 'deep'): string {
   const q = getQuality()
   if (q === '절약') return MODEL_FAST
-  if (q === '균형') return purpose === 'deep' ? MODEL_DEEP : MODEL_FAST
-  return MODEL_DEEP
+  return purpose === 'deep' ? MODEL_DEEP : MODEL_FAST
 }
 
 function resolveThinking(purpose: 'fast' | 'deep'): typeof THINKING_DEEP | undefined {
   if (isMaxMode()) return undefined // local server handles model/thinking internally
+  if (purpose === 'fast') return undefined
   const q = getQuality()
   if (q === '절약') return undefined
-  if (q === '균형') return purpose === 'deep' ? THINKING_LIGHT : undefined
-  return purpose === 'deep' ? THINKING_HEAVY : THINKING_DEEP
+  if (q === '균형') return THINKING_LIGHT
+  return THINKING_HEAVY
 }
 
 function resolveMaxTokens(purpose: 'fast' | 'deep'): number {
