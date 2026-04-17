@@ -877,16 +877,12 @@ HTML 형식 없이 일반 텍스트로 응답하세요.
     content: m.content,
   }))
 
-  const response = await fetch(resolveEndpoint(), {
-    method: 'POST',
-    headers: resolveApiHeaders(),
-    body: JSON.stringify({
-      model: resolveModel('fast'),
-      max_tokens: resolveMaxTokens('fast'),
-      system: systemPrompt,
-      messages,
-    }),
-  })
+  const response = await fetchAnthropicWithTimeout({
+    model: MODEL_FAST,
+    max_tokens: 2000,
+    system: systemPrompt,
+    messages,
+  }, { timeoutMs: 60000 })
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || 'API 오류')
