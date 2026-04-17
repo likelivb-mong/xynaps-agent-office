@@ -43,16 +43,86 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* AI-generated report HTML: force word-wrap and table scroll to prevent overflow */
+/* AI-generated report HTML: typography, tables, markdown */
+[data-report-html] h1 {
+  font-size: 1.35em; font-weight: 800; color: #f0f0f2;
+  margin: 1.1em 0 0.5em; line-height: 1.3;
+  padding-bottom: 0.3em; border-bottom: 1px solid var(--border);
+}
+[data-report-html] h2 {
+  font-size: 1.1em; font-weight: 700; color: #c8b8ff;
+  margin: 1em 0 0.4em; letter-spacing: 0.04em;
+}
+[data-report-html] h3 {
+  font-size: 0.95em; font-weight: 700; color: #94a3b8;
+  margin: 0.9em 0 0.35em; text-transform: uppercase; letter-spacing: 0.06em;
+}
+[data-report-html] h4, [data-report-html] h5, [data-report-html] h6 {
+  font-size: 0.9em; font-weight: 600; color: #64748b;
+  margin: 0.8em 0 0.3em;
+}
+[data-report-html] p {
+  margin: 0.5em 0; line-height: 1.72; color: var(--text-secondary);
+}
+[data-report-html] strong {
+  color: #e2e8f0; font-weight: 700;
+}
+[data-report-html] em {
+  color: #c8b8ff; font-style: italic;
+}
+[data-report-html] ul, [data-report-html] ol {
+  margin: 0.5em 0 0.5em 1.2em; display: flex; flex-direction: column; gap: 3px;
+}
+[data-report-html] li {
+  color: var(--text-secondary); line-height: 1.65;
+}
+[data-report-html] li::marker {
+  color: var(--accent);
+}
+[data-report-html] blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.7em 0; padding: 0.4em 0.9em;
+  background: rgba(200,255,64,0.04); border-radius: 0 6px 6px 0;
+  color: #c8b8ff; font-style: italic;
+}
+[data-report-html] hr {
+  border: none; border-top: 1px solid var(--border); margin: 1em 0;
+}
+[data-report-html] code {
+  background: rgba(255,255,255,0.07); color: #c8ff40;
+  padding: 0.1em 0.4em; border-radius: 4px; font-size: 0.88em;
+}
+[data-report-html] pre {
+  background: rgba(0,0,0,0.35); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0.6em 0;
+}
+[data-report-html] pre code {
+  background: none; padding: 0; color: #e2e8f0; font-size: 0.85em;
+}
 [data-report-html] table {
   table-layout: fixed !important;
   width: 100% !important;
+  border-collapse: collapse; margin: 0.7em 0;
+  border-radius: 8px; overflow: hidden;
 }
-[data-report-html] td,
 [data-report-html] th {
+  background: rgba(200,184,255,0.1); color: #c8b8ff;
+  font-size: 0.8em; font-weight: 700; letter-spacing: 0.06em;
+  padding: 8px 10px; text-align: left;
+  border-bottom: 1px solid rgba(200,184,255,0.2);
+}
+[data-report-html] td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  color: var(--text-secondary); vertical-align: top;
   word-break: break-word !important;
   overflow-wrap: break-word !important;
   white-space: normal !important;
+}
+[data-report-html] tr:last-child td {
+  border-bottom: none;
+}
+[data-report-html] tr:hover td {
+  background: rgba(255,255,255,0.025);
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
