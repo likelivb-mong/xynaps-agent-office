@@ -173,49 +173,63 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
               <span style={{ fontSize: 10 }}>작성 중</span>
             </span>
           )}
-          {!isRunning && report.status === 'done' && (
-            <>
-              <button onClick={() => setShowDetail(false)} title="요약 보기" style={iconBtn(!showDetail)}>
-                <ListIcon width={13} height={13} />
-              </button>
-              <button onClick={() => setShowDetail(true)} title="상세 보기" style={iconBtn(showDetail)}>
-                <EyeIcon width={13} height={13} />
-              </button>
-              <div style={{ position: 'relative' }}>
-                <button
-                  onClick={() => { if (!showDetail) return; setShowChat(v => !v) }}
-                  disabled={!showDetail}
-                  title={showDetail ? (showChat ? '채팅 닫기' : '전문가 채팅') : '상세 보기에서만 채팅 가능'}
-                  style={{
-                    ...iconBtn(showChat),
-                    opacity: showDetail ? 1 : 0.35,
-                    cursor: showDetail ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  <ChatIcon width={13} height={13} />
-                </button>
-                {chatCount > 0 && (
-                  <span style={{
-                    position: 'absolute', top: -4, right: -4,
-                    width: 14, height: 14, borderRadius: '50%',
-                    background: 'var(--accent)', color: 'var(--accent-fg)',
-                    fontSize: 8, fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    border: '1.5px solid var(--bg-card)',
-                    pointerEvents: 'none',
-                  }}>
-                    {chatCount}
-                  </span>
+          {!isRunning && report.status === 'done' && (() => {
+            const isFailed = (report.summary ?? '').includes('오류')
+            return (
+              <>
+                {!isFailed && (
+                  <>
+                    <button onClick={() => setShowDetail(false)} title="요약 보기" style={iconBtn(!showDetail)}>
+                      <ListIcon width={13} height={13} />
+                    </button>
+                    <button onClick={() => setShowDetail(true)} title="상세 보기" style={iconBtn(showDetail)}>
+                      <EyeIcon width={13} height={13} />
+                    </button>
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        onClick={() => { if (!showDetail) return; setShowChat(v => !v) }}
+                        disabled={!showDetail}
+                        title={showDetail ? (showChat ? '채팅 닫기' : '전문가 채팅') : '상세 보기에서만 채팅 가능'}
+                        style={{
+                          ...iconBtn(showChat),
+                          opacity: showDetail ? 1 : 0.35,
+                          cursor: showDetail ? 'pointer' : 'not-allowed',
+                        }}
+                      >
+                        <ChatIcon width={13} height={13} />
+                      </button>
+                      {chatCount > 0 && (
+                        <span style={{
+                          position: 'absolute', top: -4, right: -4,
+                          width: 14, height: 14, borderRadius: '50%',
+                          background: 'var(--accent)', color: 'var(--accent-fg)',
+                          fontSize: 8, fontWeight: 700,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          border: '1.5px solid var(--bg-card)',
+                          pointerEvents: 'none',
+                        }}>
+                          {chatCount}
+                        </span>
+                      )}
+                    </div>
+                  </>
                 )}
-              </div>
-
-              <span style={{
-                width: 6, height: 6, borderRadius: '50%',
-                background: 'var(--success)', flexShrink: 0,
-                marginLeft: 2,
-              }} title="완료" />
-            </>
-          )}
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                  color: isFailed ? '#fca5a5' : 'var(--success)',
+                  marginLeft: 2,
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                    background: isFailed ? '#ef4444' : 'var(--success)',
+                    boxShadow: isFailed ? '0 0 6px rgba(239,68,68,0.5)' : 'none',
+                  }} />
+                  {isFailed ? '오류' : '완료'}
+                </span>
+              </>
+            )
+          })()}
         </div>
       </div>
 
