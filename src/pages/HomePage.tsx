@@ -4,7 +4,7 @@ import { AGENTS } from '../data/agents'
 import { BRANCH_CODES } from '../data/questData'
 import { AgentCard } from '../components/agents/AgentCard'
 import { CommonSkillCard } from '../components/agents/CommonSkillCard'
-import { getProjects, duplicateProject, getAllSkills, getCommonSkills, saveProject, getTrashedProjects, moveProjectToTrash, restoreProjectFromTrash, permanentlyDeleteProjectFromTrash, syncProjectsFromSupabase } from '../lib/storage'
+import { getProjects, duplicateProject, getAllSkills, getCommonSkills, saveProject, getTrashedProjects, moveProjectToTrash, restoreProjectFromTrash, permanentlyDeleteProjectFromTrash, syncProjectsFromSupabase, syncSkillsFromSupabase } from '../lib/storage'
 import type { Project, SkillFile, AgentId, BranchCode } from '../types'
 import { CopyIcon, TrashIcon, WorkflowIcon, WriteIcon, CloseIcon, RefreshIcon } from '../components/ui/Icon'
 import { useAuth } from '../contexts/AuthContext'
@@ -33,11 +33,12 @@ export function HomePage() {
     reloadSkills()
     setProjects(getProjects())
     setTrashedProjects(getTrashedProjects())
-    // Supabase에서 최신 프로젝트 동기화
+    // Supabase에서 최신 프로젝트 + 스킬 동기화
     syncProjectsFromSupabase().then(() => {
       setProjects(getProjects())
       setTrashedProjects(getTrashedProjects())
     })
+    syncSkillsFromSupabase().then(() => reloadSkills())
   }, [location])
 
   useEffect(() => {
@@ -174,6 +175,19 @@ export function HomePage() {
           >
             <WorkflowIcon />
             협업 플로우
+          </Link>
+          <Link to="/settings" title="설정" style={{
+            padding: '6px 12px', borderRadius: 8,
+            border: '1px solid var(--border)',
+            background: 'transparent', color: 'var(--text-muted)',
+            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5,
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+            onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.borderColor = 'var(--border-bright)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            ⚙ 설정
           </Link>
           {user && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 4 }}>

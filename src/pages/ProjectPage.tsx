@@ -4,6 +4,7 @@ import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, Sa
 import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject } from '../lib/storage'
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
 import { compileGameFlow } from '../lib/api'
+import { useCostConfirm } from '../components/ui/CostConfirmModal'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
 import { GameFlowTable } from '../components/GameFlowTable'
@@ -109,6 +110,7 @@ function splitReportDetail(detail: string): { plain: string; html: string | null
 export function ProjectPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { requireConfirm, modal: costConfirmModal } = useCostConfirm()
   const [project, setProject] = useState<Project | null>(null)
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
@@ -284,6 +286,11 @@ export function ProjectPage() {
 
   async function startCollaboration() {
     if (!project) return
+    requireConfirm('full-collaboration', () => _doStartCollaboration())
+  }
+
+  function _doStartCollaboration() {
+    if (!project) return
     const { versionId } = startCollaborationRunner(project.id)
     const snapshot = getCollaborationSnapshot(project.id)
     reload()
@@ -301,33 +308,37 @@ export function ProjectPage() {
 
   function handleRerunAll() {
     if (!project || !activeVersion) return
-    const { versionId } = rerunEntireCollaboration(project.id, activeVersion.id)
-    const snapshot = getCollaborationSnapshot(project.id)
-    setActiveVersionId(versionId)
-    if (snapshot) {
-      setRunning(snapshot.running)
-      setGeneratingFinal(snapshot.generatingFinal)
-      setRunningAgentId(snapshot.runningAgentId)
-      setLiveReports(snapshot.reports)
-      setFinalReport(snapshot.finalReport)
-      setCollaborationStartedAt(Date.parse(snapshot.startedAt))
-      setCollaborationLogs(snapshot.logs)
-    }
+    requireConfirm('full-collaboration', () => {
+      const { versionId } = rerunEntireCollaboration(project.id, activeVersion.id)
+      const snapshot = getCollaborationSnapshot(project.id)
+      setActiveVersionId(versionId)
+      if (snapshot) {
+        setRunning(snapshot.running)
+        setGeneratingFinal(snapshot.generatingFinal)
+        setRunningAgentId(snapshot.runningAgentId)
+        setLiveReports(snapshot.reports)
+        setFinalReport(snapshot.finalReport)
+        setCollaborationStartedAt(Date.parse(snapshot.startedAt))
+        setCollaborationLogs(snapshot.logs)
+      }
+    })
   }
 
   function handleRerunFromAgent(agentId: AgentId) {
     if (!project || !activeVersion) return
-    const { versionId } = rerunFromAgent(project.id, activeVersion.id, agentId)
-    const snapshot = getCollaborationSnapshot(project.id)
-    setActiveVersionId(versionId)
-    if (snapshot) {
-      setRunning(snapshot.running)
-      setGeneratingFinal(snapshot.generatingFinal)
-      setRunningAgentId(snapshot.runningAgentId)
-      setLiveReports(snapshot.reports)
-      setFinalReport(snapshot.finalReport)
-      setCollaborationStartedAt(Date.parse(snapshot.startedAt))
-    }
+    requireConfirm('rerun-from-agent', () => {
+      const { versionId } = rerunFromAgent(project.id, activeVersion.id, agentId)
+      const snapshot = getCollaborationSnapshot(project.id)
+      setActiveVersionId(versionId)
+      if (snapshot) {
+        setRunning(snapshot.running)
+        setGeneratingFinal(snapshot.generatingFinal)
+        setRunningAgentId(snapshot.runningAgentId)
+        setLiveReports(snapshot.reports)
+        setFinalReport(snapshot.finalReport)
+        setCollaborationStartedAt(Date.parse(snapshot.startedAt))
+      }
+    })
   }
 
   function handleStopCollaboration() {
@@ -360,6 +371,11 @@ export function ProjectPage() {
   }
 
   async function generateGameFlow() {
+    if (!project || !activeVersion) return
+    requireConfirm('game-flow', () => _doGenerateGameFlow())
+  }
+
+  async function _doGenerateGameFlow() {
     if (!project || !activeVersion) return
     setGeneratingGameFlow(true)
     setGameFlowError(null)
@@ -2083,6 +2099,7 @@ export function ProjectPage() {
         )}
       </main>
 
+      {costConfirmModal}
     </div>
   )
 }
