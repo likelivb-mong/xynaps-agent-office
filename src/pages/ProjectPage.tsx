@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion } from '../lib/storage'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion } from '../lib/storage'
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
 import { compileGameFlow } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
@@ -401,6 +401,12 @@ export function ProjectPage() {
   function handleDeleteVersion(agentId: string, detailVersionId: string) {
     if (!project || !activeVersion) return
     deleteAgentReportVersion(project.id, activeVersion.id, agentId as AgentId, detailVersionId)
+    reload()
+  }
+
+  function handleSetActiveVersion(agentId: string, detailVersionId: string) {
+    if (!project || !activeVersion) return
+    setAgentReportActiveVersion(project.id, activeVersion.id, agentId as AgentId, detailVersionId)
     reload()
   }
 
@@ -1765,6 +1771,7 @@ export function ProjectPage() {
                   onNewVersion={handleNewVersion}
                   onChatSave={handleChatSave}
                   onDeleteVersion={handleDeleteVersion}
+                  onSetActiveVersion={handleSetActiveVersion}
                 />
               ))}
             </div>
