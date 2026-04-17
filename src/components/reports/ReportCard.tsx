@@ -15,6 +15,8 @@ interface Props {
   queuePosition?: number
   showRetryFromHere?: boolean
   onRetryFromHere?: () => void
+  onRefresh?: () => void
+  isRefreshing?: boolean
 }
 
 function extractHtml(detail: string): { html: string | null; plain: string } {
@@ -45,7 +47,7 @@ function stripOperatingBudgetSectionHtml(input: string): string {
     .trim()
 }
 
-export function ReportCard({ report, onNewVersion, onChatSave, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere }: Props) {
+export function ReportCard({ report, onNewVersion, onChatSave, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
   const [showDetail, setShowDetail] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -164,16 +166,16 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
 
         {/* Status + actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          {isRunning && (
+          {(isRunning || isRefreshing) && (
             <span style={{
               display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 11, color: 'var(--text-muted)',
             }}>
               <Spinner size={10} color="var(--accent-text)" />
-              <span style={{ fontSize: 10 }}>작성 중</span>
+              <span style={{ fontSize: 10 }}>{isRefreshing ? '재실행 중' : '작성 중'}</span>
             </span>
           )}
-          {!isRunning && report.status === 'done' && (() => {
+          {!isRunning && !isRefreshing && report.status === 'done' && (() => {
             const isFailed = (report.summary ?? '').includes('오류')
             return (
               <>
@@ -213,6 +215,15 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                       )}
                     </div>
                   </>
+                )}
+                {onRefresh && (
+                  <button
+                    onClick={onRefresh}
+                    title="이 에이전트만 재실행"
+                    style={iconBtn(false)}
+                  >
+                    <RefreshIcon width={13} height={13} />
+                  </button>
                 )}
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
