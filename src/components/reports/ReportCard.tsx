@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { marked } from 'marked'
+import { Renderer, Marked } from 'marked'
 import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
 import { AGENTS } from '../../data/agents'
 import { AgentChatPanel } from './AgentChatPanel'
@@ -23,6 +23,58 @@ interface Props {
 
 function isMarkdown(text: string): boolean {
   return /^#{1,6}\s|^\s*[-*]\s|\*\*[^*]+\*\*|^\s*>\s|^\|.+\||\n#{1,6}\s/m.test(text)
+}
+
+function parseMarkdownToStyledHtml(text: string, accentColor: string): string {
+  let sectionIdx = 0
+  const renderer = new Renderer()
+
+  renderer.heading = function ({ depth, text: t }: { depth: number; text: string }) {
+    if (depth === 1) {
+      return `<div style="padding:14px 18px 16px;background:rgba(255,255,255,0.04);border-left:4px solid ${accentColor};border-radius:0 12px 12px 0;margin-bottom:18px"><div style="font-size:18px;font-weight:800;color:#f0f0f2;line-height:1.3">${t}</div></div>`
+    }
+    if (depth === 2) {
+      sectionIdx++
+      const num = String(sectionIdx).padStart(2, '0')
+      return `<div style="background:#1a2235;border:1px solid #2a3350;border-radius:10px;padding:12px 16px;margin:18px 0 8px"><div style="font-size:9px;font-weight:800;letter-spacing:0.15em;color:${accentColor};margin-bottom:5px">${num} ·</div><div style="font-size:13px;font-weight:700;color:#e2e8f0">${t}</div></div>`
+    }
+    if (depth === 3) {
+      return `<div style="font-size:10px;font-weight:800;letter-spacing:0.1em;color:#64748b;text-transform:uppercase;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid #1e293b">${t}</div>`
+    }
+    return `<div style="font-size:12px;font-weight:700;color:#94a3b8;margin:8px 0 4px">${t}</div>`
+  } as never
+
+  ;(renderer as unknown as { blockquote: (t: { tokens: object[] }) => string }).blockquote = function (token) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const body = (this as any).parser.parse(token.tokens) as string
+    return `<div style="border-left:3px solid ${accentColor};background:rgba(255,255,255,0.04);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;color:#e2e8f0">${body}</div>`
+  }
+
+  ;(renderer as unknown as { hr: () => string }).hr = function () {
+    return `<hr style="border:none;border-top:1px solid #1e293b;margin:16px 0">`
+  }
+
+  type TableToken = { header: { tokens: object[] }[]; align: (string | null)[]; rows: { tokens: object[] }[][] }
+  ;(renderer as unknown as { table: (t: TableToken) => string }).table = function (token) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = (this as any).parser
+    const th = token.header.map((cell, i) => {
+      const cellHtml = p.parseInline(cell.tokens) as string
+      const align = token.align[i] ? `text-align:${token.align[i]}` : ''
+      return `<th style="padding:8px 12px;font-size:11px;font-weight:700;color:#64748b;text-align:left;border-bottom:2px solid #334155;background:#1e293b;${align}">${cellHtml}</th>`
+    }).join('')
+    const rows = token.rows.map(row => {
+      const cells = row.map((cell, i) => {
+        const cellHtml = p.parseInline(cell.tokens) as string
+        const align = token.align[i] ? `text-align:${token.align[i]}` : ''
+        return `<td style="padding:8px 12px;font-size:12px;color:#e2e8f0;border-bottom:1px solid #1e293b;vertical-align:top;word-break:break-word;line-height:1.55;${align}">${cellHtml}</td>`
+      }).join('')
+      return `<tr>${cells}</tr>`
+    }).join('')
+    return `<div style="overflow-x:auto;margin:10px 0"><table style="border-collapse:collapse;width:100%;table-layout:fixed"><thead><tr>${th}</tr></thead><tbody>${rows}</tbody></table></div>`
+  }
+
+  return new Marked({ renderer }).parse(text) as string
 }
 
 function extractHtml(detail: string): { html: string | null; plain: string } {
@@ -100,13 +152,24 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
     if (detailHtml) return null
     const text = detailPlain || displayDetail || ''
     if (!text || !isMarkdown(text)) return null
-    try { return marked.parse(text) as string } catch { return null }
-  }, [detailHtml, detailPlain, displayDetail])
+    try { return parseMarkdownToStyledHtml(text, agentDef.color) } catch { return null }
+  }, [detailHtml, detailPlain, displayDetail, agentDef.color])
 
   const summaryMarkdownHtml = useMemo(() => {
     const text = normalizedSummary
     if (!text || !isMarkdown(text)) return null
-    try { return marked.parse(text) as string } catch { return null }
+    // Strip markdown syntax to show as clean plain text (like HTML agent summaries)
+    const plain = text
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/^\s*[-*+]\s+/gm, '• ')
+      .replace(/^\s*>\s*/gm, '')
+      .replace(/\|[^\n]+\|/g, '')
+      .replace(/[-|:]+\n/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    return plain
   }, [normalizedSummary])
 
   const chatCount = Math.floor((report.chatHistory?.length ?? 0) / 2)
@@ -373,7 +436,7 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
                 fontSize: 13,
                 color: 'var(--text-secondary)',
                 lineHeight: 1.72,
-                whiteSpace: summaryMarkdownHtml ? 'normal' : 'pre-wrap',
+                whiteSpace: 'pre-wrap',
                 padding: showDetail ? '14px 16px 16px' : 0,
               }}>
                 {showDetail && (
@@ -406,9 +469,7 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
                       outline: 'none',
                     }}
                   />
-                ) : summaryMarkdownHtml ? (
-                  <div data-report-summary style={{ fontSize: 13, lineHeight: 1.72, color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: summaryMarkdownHtml }} />
-                ) : normalizedSummary}
+                ) : summaryMarkdownHtml ?? normalizedSummary}
                 {!isEditing && (() => {
                   const isFailed = (report.summary ?? '').includes('오류')
                   return isFailed && displayDetail ? (
