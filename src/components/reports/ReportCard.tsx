@@ -139,6 +139,13 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
   const [useBottomChatLayout, setUseBottomChatLayout] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= 1100 : false
   ))
+  const [refreshElapsed, setRefreshElapsed] = useState(0)
+  useEffect(() => {
+    if (!isRefreshing) { setRefreshElapsed(0); return }
+    const t = window.setInterval(() => setRefreshElapsed(s => s + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [isRefreshing])
+
   const agentDef = AGENTS.find(a => a.id === report.agentId)!
 
   const versions = report.detailVersions ?? []
@@ -262,7 +269,11 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
               fontSize: 11, color: 'var(--text-muted)',
             }}>
               <Spinner size={10} color="var(--accent-text)" />
-              <span style={{ fontSize: 10 }}>{isRefreshing ? '재실행 중' : '작성 중'}</span>
+              <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>
+                {isRefreshing
+                  ? `재실행 중 ${refreshElapsed > 0 ? `${Math.floor(refreshElapsed / 60) > 0 ? `${Math.floor(refreshElapsed / 60)}분 ` : ''}${(refreshElapsed % 60).toString().padStart(2, '0')}초` : ''}`
+                  : '작성 중'}
+              </span>
             </span>
           )}
           {!isRunning && !isRefreshing && report.status === 'done' && (() => {
