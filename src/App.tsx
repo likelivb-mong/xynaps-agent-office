@@ -7,10 +7,10 @@ import { NewProjectPage } from './pages/NewProjectPage'
 import { WorkflowPage } from './pages/WorkflowPage'
 import { LoginPage } from './pages/LoginPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { seedSampleProject } from './data/sampleProject'
+import { removeSampleProject } from './data/sampleProject'
 import './index.css'
 
-seedSampleProject()
+removeSampleProject()
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
