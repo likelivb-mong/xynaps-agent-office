@@ -7,6 +7,7 @@ import { NewProjectPage } from './pages/NewProjectPage'
 import { WorkflowPage } from './pages/WorkflowPage'
 import { LoginPage } from './pages/LoginPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { TestPage } from './pages/TestPage'
 import { removeSampleProject } from './data/sampleProject'
 import './index.css'
 
@@ -42,6 +43,7 @@ function AppRoutes() {
       <Route path="/project/:id" element={<ProtectedRoute><ProjectPage /></ProtectedRoute>} />
       <Route path="/workflow" element={<ProtectedRoute><WorkflowPage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+      <Route path="/test" element={<TestPage />} />
     </Routes>
   )
 }

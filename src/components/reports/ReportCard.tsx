@@ -52,6 +52,7 @@ function stripOperatingBudgetSectionHtml(input: string): string {
     .trim()
 }
 
+
 export function ReportCard({ report, onNewVersion, onChatSave, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
   const [showDetail, setShowDetail] = useState(false)
   const [showChat, setShowChat] = useState(false)
@@ -380,6 +381,23 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                     }}
                   />
                 ) : normalizedSummary}
+                {!isEditing && (() => {
+                  const isFailed = (report.summary ?? '').includes('오류')
+                  return isFailed && displayDetail ? (
+                    <div style={{
+                      marginTop: 8,
+                      padding: '8px 10px',
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: '#fca5a5',
+                      lineHeight: 1.55,
+                    }}>
+                      {displayDetail}
+                    </div>
+                  ) : null
+                })()}
               </div>
 
               {showDetail && (
@@ -552,7 +570,6 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
       {(isRunning || isRefreshing) && (() => {
         const elapsed = isRefreshing ? refreshElapsed : runningElapsed
         const fmtTime = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`
-        // Progress: fast at first, asymptotically approaches 95%
         const progress = Math.min(95, Math.round(95 * (1 - Math.exp(-elapsed / 45))))
         const LOG_ENTRIES = [
           { at: 0,   msg: '프로젝트 컨텍스트 로드 완료', ok: true },
@@ -573,7 +590,6 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
             background: 'linear-gradient(180deg, rgba(111,255,163,0.05), rgba(111,255,163,0.015) 60%, transparent 100%)',
           }}>
             <div className="project-working-scan" style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 0%, rgba(201,255,84,0.12) 45%, transparent 100%)', pointerEvents: 'none' }} />
-            {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, position: 'relative' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="project-working-led" style={{ width: 10, height: 10, borderRadius: '50%', background: '#c9ff54', boxShadow: '0 0 12px rgba(201,255,84,0.7)' }} />
@@ -581,7 +597,6 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
               </div>
               <span style={{ fontSize: 11, color: 'rgba(239,255,184,0.7)', fontVariantNumeric: 'tabular-nums' }}>{fmtTime(elapsed)}</span>
             </div>
-            {/* Terminal log */}
             <div ref={logScrollRef} style={{
               background: 'rgba(0,0,0,0.35)', borderRadius: 10,
               border: '1px solid rgba(201,255,84,0.12)',
@@ -605,7 +620,6 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                 @keyframes cursor-blink { 0%,100%{opacity:1} 50%{opacity:0} }
               `}</style>
             </div>
-            {/* Progress bar */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1, height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
                 <div style={{
