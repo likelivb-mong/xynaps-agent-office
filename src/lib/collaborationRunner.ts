@@ -237,7 +237,7 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
           startFromAgentId: mode === 'from-agent' ? startAgentId : undefined,
           seedReports,
           signal: abortController.signal,
-          timeoutMs: 360000,
+          timeoutMs: 660000,
         },
       )
 
