@@ -207,6 +207,9 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
             runningAgentId: null,
             reports: nextReports,
           })
+          // Persist incrementally so completed results survive errors mid-run
+          const doneReports = nextReports.filter(r => r.status === 'done' && r.summary)
+          if (doneReports.length > 0) updateVersionReports(project.id, version.id, doneReports)
           const failed = !parsed || parsed.summary.includes('오류')
           appendLog(project.id, {
             id: crypto.randomUUID(),
