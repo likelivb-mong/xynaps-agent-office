@@ -1426,7 +1426,7 @@ export async function compileGameFlow(
   onProgress?.('running')
 
   const reportsText = agentReports.map(r =>
-    `### ${r.agentName} (${r.agentId})\n${isMaxMode() ? r.summary : r.detail}`
+    `### ${r.agentName} (${r.agentId})\n${r.summary || r.detail}`
   ).join('\n\n')
 
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
