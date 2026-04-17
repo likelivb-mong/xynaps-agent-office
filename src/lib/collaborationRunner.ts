@@ -204,11 +204,12 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
             runningAgentId: null,
             reports: nextReports,
           })
+          const failed = !parsed || parsed.summary.includes('오류')
           appendLog(project.id, {
             id: crypto.randomUUID(),
             at: new Date().toISOString(),
-            level: parsed && parsed.summary.includes('오류') ? 'error' : 'success',
-            message: parsed && parsed.summary.includes('오류')
+            level: failed ? 'error' : 'success',
+            message: failed
               ? `${targetAgent?.name ?? agentId} 작업 실패`
               : `${targetAgent?.name ?? agentId} 작업 완료`,
           })
@@ -230,7 +231,7 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
           startFromAgentId: mode === 'from-agent' ? startAgentId : undefined,
           seedReports,
           signal: abortController.signal,
-          timeoutMs: 120000,
+          timeoutMs: 360000,
         },
       )
 
@@ -285,7 +286,7 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
         const ceoAgent = AGENTS.find(agent => agent.id === 'ceo')!
         const final = await runFinalReport(freshProject.name, normalizedReports, { ...ceoAgent, skills: getAllSkills().ceo || [] }, {
           signal: abortController.signal,
-          timeoutMs: 90000,
+          timeoutMs: 300000,
         })
         const finalReport: FinalReport = { ...final, createdAt: new Date().toISOString() }
         updateVersionReports(project.id, version.id, normalizedReports, finalReport)
@@ -436,6 +437,80 @@ export function rerunFromAgent(projectId: string, versionId: string, agentId: Ag
   if (!project || !version) throw new Error('재실행할 버전을 찾을 수 없습니다.')
   runJob(project, version, 'from-agent', agentId)
   return { versionId: version.id, versionName: version.versionName, alreadyRunning: false }
+}
+
+export function rerunFinalReportOnly(projectId: string, versionId: string): { alreadyRunning: boolean } {
+  const runningSnapshot = snapshots.get(projectId)
+  if (runningSnapshot && activeJobs.has(projectId)) return { alreadyRunning: true }
+
+  const project = getProjects().find(item => item.id === projectId)
+  const version = project ? resolveVersion(project, versionId) : null
+  if (!project || !version) throw new Error('버전을 찾을 수 없습니다.')
+
+  const abortController = new AbortController()
+  activeControllers.set(projectId, abortController)
+  const startedAt = new Date().toISOString()
+  const existingReports = version.agentReports ?? []
+
+  const current = snapshots.get(projectId)
+  setSnapshot(projectId, {
+    projectId,
+    versionId: version.id,
+    versionName: version.versionName,
+    startedAt,
+    running: false,
+    generatingFinal: true,
+    runningAgentId: null,
+    reports: existingReports,
+    finalReport: null,
+    error: null,
+    logs: [
+      { id: crypto.randomUUID(), at: startedAt, level: 'info', message: '최종 보고서만 재시도합니다.' },
+      ...(current?.logs ?? []),
+    ],
+  })
+
+  updateProjectCollaborationStatus(projectId, {
+    active: true,
+    startedAt,
+    phase: 'finalizing',
+    completedAgentIds: existingReports.map(r => r.agentId),
+    versionId: version.id,
+    versionName: version.versionName,
+  })
+
+  const job = (async () => {
+    try {
+      const ceoAgent = AGENTS.find(a => a.id === 'ceo')!
+      const final = await runFinalReport(project.name, existingReports, { ...ceoAgent, skills: getAllSkills().ceo || [] }, {
+        signal: abortController.signal,
+        timeoutMs: 300000,
+      })
+      const finalReport: FinalReport = { ...final, createdAt: new Date().toISOString() }
+      updateVersionReports(projectId, version.id, existingReports, finalReport)
+      const after = snapshots.get(projectId)
+      if (after) setSnapshot(projectId, { ...after, generatingFinal: false, finalReport, error: null })
+      appendLog(projectId, { id: crypto.randomUUID(), at: new Date().toISOString(), level: 'success', message: '최종 보고서 종합이 완료되었습니다.' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const fallbackFinal: FinalReport = {
+        summary: '최종 보고서 생성 중 오류가 발생했습니다',
+        detail: `에이전트별 보고서는 저장되었지만 최종 종합 단계에서 오류가 발생했습니다.\n\n원인:\n${message}`,
+        createdAt: new Date().toISOString(),
+      }
+      updateVersionReports(projectId, version.id, existingReports, fallbackFinal)
+      const after = snapshots.get(projectId)
+      if (after) setSnapshot(projectId, { ...after, generatingFinal: false, finalReport: fallbackFinal, error: message })
+      appendLog(projectId, { id: crypto.randomUUID(), at: new Date().toISOString(), level: 'error', message: `최종 보고서 종합 실패: ${message}` })
+    } finally {
+      updateProjectCollaborationStatus(projectId, null)
+      activeControllers.delete(projectId)
+      activeJobs.delete(projectId)
+    }
+  })()
+
+  activeJobs.set(projectId, job)
+  return { alreadyRunning: false }
 }
 
 export function cancelCollaborationRunner(projectId: string): boolean {

@@ -70,16 +70,27 @@ app.post('/api/messages', async (req, res) => {
 function callClaudeCli(prompt, res) {
   const chunks = []
   const errChunks = []
+  let settled = false
 
   const proc = spawn('claude', ['-p', prompt, '--output-format', 'text'], {
     env: process.env,
     maxBuffer: 20 * 1024 * 1024,
   })
 
+  const killTimer = setTimeout(() => {
+    if (settled) return
+    settled = true
+    proc.kill()
+    res.status(500).json({ error: { message: 'Claude CLI 응답 시간이 초과되었습니다 (6분). 다시 시도해주세요.' } })
+  }, 360000)
+
   proc.stdout.on('data', d => chunks.push(d))
   proc.stderr.on('data', d => errChunks.push(d))
 
   proc.on('close', code => {
+    clearTimeout(killTimer)
+    if (settled) return
+    settled = true
     if (code !== 0) {
       const errMsg = Buffer.concat(errChunks).toString().trim()
       return res.status(500).json({
@@ -96,6 +107,9 @@ function callClaudeCli(prompt, res) {
   })
 
   proc.on('error', err => {
+    clearTimeout(killTimer)
+    if (settled) return
+    settled = true
     if (err.code === 'ENOENT') {
       res.status(500).json({
         error: {

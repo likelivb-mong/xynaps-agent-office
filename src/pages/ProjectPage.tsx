@@ -5,7 +5,7 @@ import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersion
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
 import { compileGameFlow } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
-import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
+import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
 import { GameFlowTable } from '../components/GameFlowTable'
 import { GameFlowMap } from '../components/GameFlowMap'
@@ -322,6 +322,22 @@ export function ProjectPage() {
         setCollaborationLogs(snapshot.logs)
       }
     })
+  }
+
+  function handleRerunFinalOnly() {
+    if (!project || !activeVersion) return
+    const { alreadyRunning } = rerunFinalReportOnly(project.id, activeVersion.id)
+    if (alreadyRunning) return
+    const snapshot = getCollaborationSnapshot(project.id)
+    if (snapshot) {
+      setRunning(snapshot.running)
+      setGeneratingFinal(snapshot.generatingFinal)
+      setRunningAgentId(snapshot.runningAgentId)
+      setLiveReports(snapshot.reports)
+      setFinalReport(snapshot.finalReport)
+      setCollaborationStartedAt(Date.parse(snapshot.startedAt))
+      setCollaborationLogs(snapshot.logs)
+    }
   }
 
   function handleRerunFromAgent(agentId: AgentId) {
@@ -1463,22 +1479,6 @@ export function ProjectPage() {
                       <span style={{ fontSize: 12, fontWeight: 800, color: '#efffb8', letterSpacing: '0.12em' }}>
                         AI COLLABORATION WORK MODE
                       </span>
-                      <button
-                        onClick={handleStopCollaboration}
-                        style={{
-                          marginLeft: 8,
-                          padding: '5px 10px',
-                          borderRadius: 999,
-                          border: '1px solid rgba(248,113,113,0.32)',
-                          background: 'rgba(248,113,113,0.1)',
-                          color: '#fca5a5',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        정지
-                      </button>
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 6 }}>
                       {generatingFinal
@@ -1575,12 +1575,35 @@ export function ProjectPage() {
                     background: 'rgba(8,10,14,0.24)',
                     padding: '14px 14px 12px',
                   }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>작업 파이프라인</div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>작업 파이프라인</span>
+                      <button
+                        onClick={handleStopCollaboration}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '5px 12px',
+                          borderRadius: 8,
+                          border: '1.5px solid rgba(248,113,113,0.5)',
+                          background: 'rgba(248,113,113,0.12)',
+                          color: '#fca5a5',
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          letterSpacing: '0.03em',
+                        }}
+                      >
+                        <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor"><rect width="9" height="9" rx="1.5"/></svg>
+                        작업 중지
+                      </button>
+                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {workflowAgentIds.map((agentId, index) => {
                         const agent = AGENTS.find(a => a.id === agentId)
-                        const isDone = displayReports.find(r => r.agentId === agentId)?.status === 'done'
+                        const agentReport = displayReports.find(r => r.agentId === agentId)
+                        const isDone = agentReport?.status === 'done'
+                        const isFailed = isDone && (agentReport?.summary ?? '').includes('오류')
                         const isActive = !generatingFinal && runningAgentId === agentId
+                        const dotColor = isFailed ? '#ef4444' : isDone ? 'var(--success)' : isActive ? '#c9ff54' : 'rgba(148,163,184,0.55)'
                         return (
                           <div key={agentId} style={{
                             display: 'flex',
@@ -1588,22 +1611,22 @@ export function ProjectPage() {
                             gap: 10,
                             padding: '8px 10px',
                             borderRadius: 11,
-                            border: `1px solid ${isActive ? `${agent?.color ?? '#c9ff54'}44` : 'rgba(255,255,255,0.05)'}`,
-                            background: isActive ? `${agent?.color ?? '#c9ff54'}14` : 'rgba(255,255,255,0.015)',
+                            border: `1px solid ${isActive ? `${agent?.color ?? '#c9ff54'}44` : isFailed ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`,
+                            background: isActive ? `${agent?.color ?? '#c9ff54'}14` : isFailed ? 'rgba(239,68,68,0.06)' : 'rgba(255,255,255,0.015)',
                           }}>
                             <span style={{
                               width: 9,
                               height: 9,
                               borderRadius: '50%',
-                              background: isDone ? 'var(--success)' : isActive ? '#c9ff54' : 'rgba(148,163,184,0.55)',
-                              boxShadow: isActive ? '0 0 12px rgba(201,255,84,0.65)' : 'none',
+                              background: dotColor,
+                              boxShadow: isActive ? '0 0 12px rgba(201,255,84,0.65)' : isFailed ? '0 0 6px rgba(239,68,68,0.4)' : 'none',
                               animation: isActive ? 'projectWorkingPulse 1.2s ease-in-out infinite' : 'none',
                               flexShrink: 0,
                             }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12.5, color: 'var(--text-primary)', fontWeight: 700 }}>{agent?.name ?? agentId}</div>
-                              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                                {isDone ? '완료' : isActive ? '생성 중' : `대기 ${index + 1}`}
+                              <div style={{ fontSize: 12.5, color: isFailed ? '#fca5a5' : 'var(--text-primary)', fontWeight: 700 }}>{agent?.name ?? agentId}</div>
+                              <div style={{ fontSize: 10.5, color: isFailed ? '#fca5a5' : 'var(--text-muted)', marginTop: 2 }}>
+                                {isFailed ? '오류' : isDone ? '완료' : isActive ? '생성 중' : `대기 ${index + 1}`}
                               </div>
                             </div>
                           </div>
@@ -1640,7 +1663,7 @@ export function ProjectPage() {
               </div>
             )}
             {!running && !generatingFinal && activeTab === 'reports' && (
-              <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-start', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                 <button
                   onClick={handleRerunAll}
                   style={{
@@ -1660,6 +1683,27 @@ export function ProjectPage() {
                   <RefreshIcon width={13} height={13} />
                   전체 재실행
                 </button>
+                {displayFinalClean?.summary?.includes('오류') && (
+                  <button
+                    onClick={handleRerunFinalOnly}
+                    style={{
+                      padding: '9px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(99,179,237,0.34)',
+                      background: 'rgba(99,179,237,0.1)',
+                      color: '#90cdf4',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 7,
+                    }}
+                  >
+                    <RefreshIcon width={13} height={13} />
+                    최종 보고서만 재시도
+                  </button>
+                )}
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
