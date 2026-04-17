@@ -564,6 +564,107 @@ function toReadableApiError(error: unknown, fallback: string): Error {
   return new Error(fallback)
 }
 
+async function streamMaxModeRequest(
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+): Promise<string> {
+  const controller = new AbortController()
+  const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
+  options?.signal?.addEventListener('abort', abortForward)
+
+  try {
+    const response = await fetch(resolveEndpoint(), {
+      method: 'POST',
+      headers: resolveApiHeaders(),
+      body: JSON.stringify({ ...body, stream: true }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const data = await response.json()
+      throw new Error(data.error?.message || 'API 오류')
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let buf = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim()
+        if (!raw || raw === '[DONE]') continue
+        let evt: { type: string; text?: string; message?: string }
+        try { evt = JSON.parse(raw) } catch { continue }
+        if (evt.type === 'delta' && evt.text) {
+          text += evt.text
+        } else if (evt.type === 'error') {
+          throw new Error(evt.message || 'CLI 오류')
+        }
+      }
+    }
+    return text
+  } finally {
+    options?.signal?.removeEventListener('abort', abortForward)
+  }
+}
+
+async function streamAnthropicRequest(
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+): Promise<string> {
+  const controller = new AbortController()
+  const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
+  options?.signal?.addEventListener('abort', abortForward)
+
+  try {
+    const response = await fetch(resolveEndpoint(), {
+      method: 'POST',
+      headers: resolveApiHeaders(),
+      body: JSON.stringify({ ...body, stream: true }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const data = await response.json()
+      throw new Error(data.error?.message || 'API 오류')
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let buf = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const raw = line.slice(6).trim()
+        if (!raw || raw === '[DONE]') continue
+        try {
+          const evt = JSON.parse(raw)
+          if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+            text += evt.delta.text
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+    return text
+  } finally {
+    options?.signal?.removeEventListener('abort', abortForward)
+  }
+}
+
 async function fetchAnthropicWithTimeout(
   body: unknown,
   options?: {
@@ -1190,17 +1291,23 @@ export async function runProjectCollaboration(
       ]
 
       const thinkingOpts = resolveThinking('deep')
-      const response = await fetchAnthropicWithTimeout({
-        model: resolveModel('deep'),
-        max_tokens: resolveMaxTokens('deep'),
-        ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
-        system: getSystemPrompt(agent, cumulativeContext),
-        messages: [{ role: 'user', content: userContent }],
-      }, { signal: options?.signal, timeoutMs: options?.timeoutMs ?? 240000 })
-
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-      const result = extractText(data)
+      const result = isMaxMode()
+        // Max mode: stream SSE from local CLI server
+        ? await streamMaxModeRequest({
+            model: resolveModel('deep'),
+            max_tokens: resolveMaxTokens('deep'),
+            ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
+            system: getSystemPrompt(agent, cumulativeContext),
+            messages: [{ role: 'user', content: userContent }],
+          }, { signal: options?.signal })
+        // Direct API: stream SSE from Anthropic
+        : await streamAnthropicRequest({
+            model: resolveModel('deep'),
+            max_tokens: resolveMaxTokens('deep'),
+            ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
+            system: getSystemPrompt(agent, cumulativeContext),
+            messages: [{ role: 'user', content: userContent }],
+          }, { signal: options?.signal })
 
       const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|<!--XYNAPS_HTML-->|$)/)
       const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
