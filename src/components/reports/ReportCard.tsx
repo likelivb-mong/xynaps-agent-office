@@ -357,6 +357,23 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                     }}
                   />
                 ) : normalizedSummary}
+                {!isEditing && (() => {
+                  const isFailed = (report.summary ?? '').includes('오류')
+                  return isFailed && displayDetail ? (
+                    <div style={{
+                      marginTop: 8,
+                      padding: '8px 10px',
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: '#fca5a5',
+                      lineHeight: 1.55,
+                    }}>
+                      {displayDetail}
+                    </div>
+                  ) : null
+                })()}
               </div>
 
               {showDetail && (
