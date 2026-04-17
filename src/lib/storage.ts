@@ -383,6 +383,26 @@ export function updateAgentReportChat(
   saveProject(project)
 }
 
+export function deleteAgentReportVersion(
+  projectId: string,
+  versionId: string,
+  agentId: AgentId,
+  detailVersionId: string
+): void {
+  const projects = getProjects()
+  const project = projects.find(p => p.id === projectId)!
+  const version = project.versions.find(v => v.id === versionId)!
+  const report = version.agentReports.find(r => r.agentId === agentId)
+  if (!report || !report.detailVersions) return
+  const remaining = report.detailVersions.filter(v => v.id !== detailVersionId)
+  report.detailVersions = remaining
+  if (report.activeVersionId === detailVersionId) {
+    report.activeVersionId = remaining[remaining.length - 1]?.id ?? undefined
+  }
+  project.updatedAt = new Date().toISOString()
+  saveProject(project)
+}
+
 export function setAgentReportActiveVersion(
   projectId: string,
   versionId: string,
