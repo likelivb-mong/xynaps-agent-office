@@ -127,6 +127,12 @@ function buildFileContent(files: SkillFile[]) {
       if (f.guidePrompt?.trim()) {
         blocks.push({ type: 'text' as const, text: `[위 파일 활용 가이드: ${f.name}]\n${f.guidePrompt.trim()}` })
       }
+    } else if (f.knowledgeSummary) {
+      // base64가 없을 때(파일 재업로드 없이 세션 간 지속 시) 분석 요약으로 대체
+      blocks.push({ type: 'text' as const, text: `[스킬 파일: ${f.name}]\n${f.knowledgeSummary}` })
+      if (f.guidePrompt?.trim()) {
+        blocks.push({ type: 'text' as const, text: `[위 파일 활용 가이드: ${f.name}]\n${f.guidePrompt.trim()}` })
+      }
     }
   }
   return blocks

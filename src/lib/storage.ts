@@ -346,7 +346,9 @@ export function saveAgentSkill(agentId: AgentId, skill: SkillFile): void {
   try {
     const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
     if (!all[agentId]) all[agentId] = []
-    all[agentId].push(skill)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { base64, url, ...meta } = skill
+    all[agentId].push(meta)
     localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
   } catch (e) { console.error(e) }
 }
@@ -393,7 +395,9 @@ export function getCommonSkills(): SkillFile[] {
 export function saveCommonSkill(skill: SkillFile): void {
   try {
     const all = getCommonSkills()
-    all.push(skill)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { base64, url, ...meta } = skill
+    all.push(meta)
     localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(all))
   } catch (e) { console.error(e) }
 }
