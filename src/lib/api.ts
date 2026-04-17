@@ -1038,7 +1038,7 @@ const HTML_STYLE_GUIDE = `
 
 HTML 작성 규칙 (반드시 준수):
 - 모든 style은 inline으로만 작성 (외부 CSS, class 사용 금지)
-- font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif
+- font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif
 - 기본 텍스트: color:#e2e8f0
 - 카드: background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px
 - 서브텍스트: color:#94a3b8 또는 color:#64748b
@@ -1047,9 +1047,9 @@ HTML 작성 규칙 (반드시 준수):
 - 테이블 필수 규칙: border-collapse:collapse; width:100%; table-layout:fixed
   - thead: background:#1e293b
   - th: padding:8px 12px; font-size:11px; font-weight:700; color:#64748b; text-align:left; border-bottom:2px solid #334155
-  - td: padding:8px 12px; font-size:12px; color:#e2e8f0; border-bottom:1px solid #1e293b; vertical-align:top
+  - td: padding:8px 12px; font-size:12px; color:#e2e8f0; border-bottom:1px solid #1e293b; vertical-align:top; word-break:break-word; overflow-wrap:break-word
   - 텍스트가 긴 컬럼(핵심행동·설명 등)은 반드시 width:35% 이상 지정하고 line-height:1.6 적용
-  - 짧은 컬럼(시간·수량·난이도 등)은 width:8~12% 지정, white-space:nowrap
+  - 짧은 컬럼(시간·수량·난이도 등)은 width:8~12% 지정 (white-space:nowrap 사용 금지 — 오버플로우 원인)
 - 색상 포인트는 에이전트 고유색 계열 사용
 - 한국어 텍스트 사용
 - 금지: "07 운영 · 예산" 섹션, "힌트 프로토콜", "예산 추정/견적" 관련 내용
