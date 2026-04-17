@@ -102,6 +102,12 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
     try { return marked.parse(text) as string } catch { return null }
   }, [detailHtml, detailPlain, displayDetail])
 
+  const summaryMarkdownHtml = useMemo(() => {
+    const text = normalizedSummary
+    if (!text || !isMarkdown(text)) return null
+    try { return marked.parse(text) as string } catch { return null }
+  }, [normalizedSummary])
+
   const chatCount = Math.floor((report.chatHistory?.length ?? 0) / 2)
 
   useEffect(() => {
@@ -347,7 +353,7 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                 fontSize: 13,
                 color: 'var(--text-secondary)',
                 lineHeight: 1.72,
-                whiteSpace: 'pre-wrap',
+                whiteSpace: summaryMarkdownHtml ? 'normal' : 'pre-wrap',
                 padding: showDetail ? '14px 16px 16px' : 0,
               }}>
                 {showDetail && (
@@ -380,6 +386,8 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                       outline: 'none',
                     }}
                   />
+                ) : summaryMarkdownHtml ? (
+                  <div data-report-html style={{ fontSize: 13, lineHeight: 1.72, color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: summaryMarkdownHtml }} />
                 ) : normalizedSummary}
                 {!isEditing && (() => {
                   const isFailed = (report.summary ?? '').includes('오류')
