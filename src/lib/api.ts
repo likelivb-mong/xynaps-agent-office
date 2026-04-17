@@ -186,12 +186,22 @@ export async function listGoogleDriveFolderMetadata(folderId: string, oauthToken
   return out
 }
 
+const MAX_MODE_TEXT_LIMIT = 15000
+
 function filterBinaryForMaxMode(blocks: unknown[]): unknown[] {
   if (!isMaxMode()) return blocks
-  return blocks.filter((b: unknown) => {
-    const type = (b as { type?: string }).type
-    return type !== 'image' && type !== 'document'
-  })
+  return blocks
+    .filter((b: unknown) => {
+      const type = (b as { type?: string }).type
+      return type !== 'image' && type !== 'document'
+    })
+    .map((b: unknown) => {
+      const block = b as { type?: string; text?: string }
+      if (block.type === 'text' && block.text && block.text.length > MAX_MODE_TEXT_LIMIT) {
+        return { ...block, text: block.text.slice(0, MAX_MODE_TEXT_LIMIT) + '\n...(이하 생략)' }
+      }
+      return b
+    })
 }
 
 function buildFileContent(files: SkillFile[]) {
