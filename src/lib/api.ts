@@ -1432,36 +1432,19 @@ export async function compileGameFlow(
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
   const attachmentContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
 
-  const systemPrompt = `당신은 방탈출 게임 플로우 시트 전문가입니다.
-6개 에이전트의 기획 결과를 바탕으로 실제 게임 플로우 시트를 JSON 형식으로 작성합니다.
-반드시 유효한 JSON만 반환하고, 다른 텍스트는 포함하지 마세요.
+  const systemPrompt = `방탈출 게임 플로우 시트 전문가. 유효한 JSON만 반환, 다른 텍스트 없음.
+Xkit=디지털파일장치 Key=물리잠금 Dev=전자센서/트리거
+문제유형: 평면(텍스트/영상/x-kit/UV) 입체(물품/장치) 공간(배치/협동) 감각`
 
-## 핵심 시스템 정의
-- Xkit(엑스키트): ${XKIT_DEFINITION}
-- Key(자물쇠/잠금): 서랍·상자·가방·함 등 오프라인 물리적 잠금장치
-- Dev(전자장치): 입력값과 출력값이 명확히 정의된 센서·자동장치·트리거 시스템
+  const userPrompt = `테마: ${projectTheme}
+${crimeContext ? crimeContext.split('\n').slice(0, 10).join('\n') : ''}
 
-## 문제 유형 분류
-- 평면(Plane): 텍스트(종이·벽·보드) / 영상(TV·빔) / x-kit(디지털파일) / UV(자외선)
-- 입체(Solid): 물품(원형·변형·제작) / 장치(회로·키트·기계·기계제어)
-- 공간(Space): 공간배치(a) / 협동(b)
-- 감각(Sense): 시각·청각·후각·미각·촉각`
-
-  const userPrompt = `## 프로젝트 정보
-테마: ${projectTheme}
-${crimeContext}
-
-## 에이전트 기획 결과
+에이전트 요약:
 ${reportsText}
 
-위 내용을 바탕으로 게임 플로우 시트를 작성하세요.
-
-핵심 원칙:
-- 전체 스텝 수는 25~35개로 제한하세요 (목표: 30개).
-- 스텝이 없는 공간은 생략하고, 실제 플레이어가 진행하는 순서대로 작성하세요.
-- 스토리 흐름의 각 공간(방)을 섹션으로 구성하세요.
-- 핵심 스토리 전환점·퍼즐·단서만 남기고, 부수적이거나 반복되는 스텝은 병합하거나 생략하세요.
-- 각 스텝의 story 필드: 플레이어 시점에서 이 단계의 핵심 행동과 스토리 맥락을 1~2문장으로 명확하게 서술하세요.
+게임 플로우 JSON 작성 (30스텝 이내, 핵심만):
+- 공간별 섹션, 플레이어 진행순
+- story: 핵심행동 1문장
 
 반환 형식 (JSON만, 다른 텍스트 없이):
 {
@@ -1499,7 +1482,7 @@ ${reportsText}
       ...(thinkingFinal ? { thinking: thinkingFinal } : {}),
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
-    }, { timeoutMs: 480000 })
+    }, { timeoutMs: 720000 })
 
     const data = await response.json()
     if (!response.ok) throw new Error(data.error?.message || 'API 오류')
