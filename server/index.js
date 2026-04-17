@@ -84,8 +84,8 @@ function callClaudeCli(prompt, res) {
     if (settled) return
     settled = true
     proc.kill()
-    res.status(500).json({ error: { message: 'Claude CLI 응답 시간이 초과되었습니다 (6분). 다시 시도해주세요.' } })
-  }, 360000)
+    res.status(500).json({ error: { message: 'Claude CLI 응답 시간이 초과되었습니다 (15분). 다시 시도해주세요.' } })
+  }, 900000)
 
   proc.stdout.on('data', d => chunks.push(d))
   proc.stderr.on('data', d => errChunks.push(d))
