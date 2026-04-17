@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
 import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion } from '../lib/storage'
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
-import { compileGameFlow } from '../lib/api'
+import { compileGameFlow, compileAudioScript } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, rerunSingleAgent, isSingleAgentRunning, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
@@ -127,6 +127,8 @@ export function ProjectPage() {
   const [generatingGameFlow, setGeneratingGameFlow] = useState(false)
   const [gameFlowElapsed, setGameFlowElapsed] = useState(0)
   const [gameFlowError, setGameFlowError] = useState<string | null>(null)
+  const [generatingAudioScript, setGeneratingAudioScript] = useState(false)
+  const [audioScriptError, setAudioScriptError] = useState<string | null>(null)
   const [gameFlowSyncedAt, setGameFlowSyncedAt] = useState<string | null>(null)
   const [workspaceSaveStatus, setWorkspaceSaveStatus] = useState<'idle' | 'saved'>('idle')
   const [showWorkspaceHistory, setShowWorkspaceHistory] = useState(false)
@@ -470,6 +472,25 @@ export function ProjectPage() {
     if (!project || !activeVersion) return
     updateVersionAudioScript(project.id, activeVersion.id, script)
     reload()
+  }
+
+  async function handleGenerateAudioScript() {
+    if (!project || !activeVersion) return
+    setGeneratingAudioScript(true)
+    setAudioScriptError(null)
+    try {
+      const soundReport = activeVersion.agentReports.find(r => r.agentId === 'sound')
+      const reportText = soundReport
+        ? (soundReport.summary || '') + (soundReport.detail ? '\n' + soundReport.detail : '')
+        : activeVersion.agentReports.map(r => `[${r.agentName}] ${r.summary}`).join('\n')
+      const sheet = await compileAudioScript(reportText)
+      updateVersionAudioScript(project.id, activeVersion.id, sheet)
+      reload()
+    } catch (e) {
+      setAudioScriptError(e instanceof Error ? e.message : '오디오 스크립트 생성에 실패했습니다.')
+    } finally {
+      setGeneratingAudioScript(false)
+    }
   }
 
   function handleWorkspaceSave() {
@@ -2135,10 +2156,24 @@ export function ProjectPage() {
                   />
                 )}
                 {gameflowView === 'script' && hasSurround && (
-                  <AudioScriptTable
-                    script={activeVersion.audioScript}
-                    onChange={handleAudioScriptChange}
-                  />
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, gap: 8 }}>
+                      {audioScriptError && <span style={{ fontSize: 12, color: '#f87171', alignSelf: 'center' }}>{audioScriptError}</span>}
+                      <button onClick={handleGenerateAudioScript} disabled={generatingAudioScript} style={{
+                        padding: '7px 16px', borderRadius: 8, border: '1px solid var(--border)',
+                        background: generatingAudioScript ? 'var(--bg-secondary)' : 'var(--bg-card)',
+                        color: generatingAudioScript ? 'var(--text-muted)' : 'var(--text-primary)',
+                        fontSize: 12, fontWeight: 600, cursor: generatingAudioScript ? 'not-allowed' : 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        {generatingAudioScript ? <><Spinner size={12} color="var(--text-muted)" /> 생성 중...</> : '음향 보고서 반영하기'}
+                      </button>
+                    </div>
+                    <AudioScriptTable
+                      script={activeVersion.audioScript}
+                      onChange={handleAudioScriptChange}
+                    />
+                  </>
                 )}
               </>
             ) : (
