@@ -264,6 +264,19 @@ export function updateVersionGameFlow(
   saveProject(project)
 }
 
+export function updateVersionAudioScript(
+  projectId: string,
+  versionId: string,
+  audioScript: import('../types').AudioScript
+): void {
+  const projects = getProjects()
+  const project = projects.find(p => p.id === projectId)!
+  const version = project.versions.find(v => v.id === versionId)!
+  version.audioScript = audioScript
+  project.updatedAt = new Date().toISOString()
+  saveProject(project)
+}
+
 export function updateAgentReportChat(
   projectId: string,
   versionId: string,

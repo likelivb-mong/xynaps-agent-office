@@ -134,6 +134,7 @@ export interface ProjectVersion {
   agentReports: AgentReport[]
   finalReport?: FinalReport
   gameFlow?: GameFlowSheet
+  audioScript?: AudioScript
   workshopSessions?: WorkshopSession[]
   status: 'draft' | 'in-progress' | 'completed'
 }
@@ -274,6 +275,30 @@ export interface GameFlowSheet {
   sections: GameFlowSection[]
   generatedAt: string
   userFlow?: UserFlowConfig
+}
+
+export type AudioChannel = 'L' | 'R' | 'C' | 'L+R' | 'SFX' | '전환'
+export type AudioRowKind = 'line' | 'cue'
+
+export interface AudioScriptRow {
+  id: string
+  kind: AudioRowKind
+  channel?: AudioChannel
+  content: string
+}
+
+export interface AudioScriptTrack {
+  id: string
+  trackNum: number
+  title: string
+  timeStart: string
+  timeEnd: string
+  rows: AudioScriptRow[]
+}
+
+export interface AudioScript {
+  tracks: AudioScriptTrack[]
+  generatedAt: string
 }
 export interface ChatMessage {
   id: string

@@ -1,18 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, updateVersionReports, updateVersionGameFlow, updateAgentReportChat, saveProject } from '../lib/storage'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject } from '../lib/storage'
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
 import { compileGameFlow } from '../lib/api'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
 import { GameFlowTable } from '../components/GameFlowTable'
 import { GameFlowMap } from '../components/GameFlowMap'
+import AudioScriptTable from '../components/AudioScriptTable'
 import { MetaStudio } from '../components/MetaStudio'
 import { WorkshopTab } from '../components/workshop/WorkshopTab'
 import { AGENTS } from '../data/agents'
 import { BRANCH_CODES } from '../data/questData'
-import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, ChatMessage, DetailVersion, BranchCode, CrimeConfig, CharacterRole, StoryStageKey } from '../types'
+import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, AudioScript, ChatMessage, DetailVersion, BranchCode, CrimeConfig, CharacterRole, StoryStageKey } from '../types'
 
 // ─── 브리핑 섹션 ────────────────────────────────────────────────────────────
 function BriefingSection({
@@ -120,7 +121,7 @@ export function ProjectPage() {
   const [finalEditSummary, setFinalEditSummary] = useState('')
   const [finalEditDetail, setFinalEditDetail] = useState('')
   const [activeTab, setActiveTab] = useState<'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop'>('reports')
-  const [gameflowView, setGameflowView] = useState<'table' | 'map' | 'user'>('table')
+  const [gameflowView, setGameflowView] = useState<'table' | 'map' | 'user' | 'script'>('table')
   const [generatingGameFlow, setGeneratingGameFlow] = useState(false)
   const [gameFlowError, setGameFlowError] = useState<string | null>(null)
   const [gameFlowSyncedAt, setGameFlowSyncedAt] = useState<string | null>(null)
@@ -390,6 +391,12 @@ export function ProjectPage() {
     reload()
   }
 
+  function handleAudioScriptChange(script: AudioScript) {
+    if (!project || !activeVersion) return
+    updateVersionAudioScript(project.id, activeVersion.id, script)
+    reload()
+  }
+
   function handleWorkspaceSave() {
     if (!project || !activeVersion) return
     let payload: unknown = null
@@ -640,9 +647,11 @@ export function ProjectPage() {
       v.label !== '원본' && new Date(v.createdAt) > new Date(activeVersion.gameFlow!.generatedAt)
     )
   ))
+  const hasSurround = (project?.gameSystemTypes ?? []).includes('surround')
   const isWideCanvasLayout =
     (activeTab === 'gameflow' && (gameflowView === 'map' || gameflowView === 'user')) ||
     activeTab === 'studio'
+
 
   function formatDuration(totalSeconds: number) {
     const seconds = Math.max(0, Math.floor(totalSeconds))
@@ -1889,13 +1898,15 @@ export function ProjectPage() {
                         { key: 'table', label: 'Step Table' },
                         { key: 'map', label: 'Pass Map' },
                         { key: 'user', label: 'User Flow' },
+                        ...(hasSurround ? [{ key: 'script', label: '🎧 Script' }] : []),
                       ].map(v => (
-                        <button key={v.key} onClick={() => setGameflowView(v.key as 'table' | 'map' | 'user')} style={{
+                        <button key={v.key} onClick={() => setGameflowView(v.key as 'table' | 'map' | 'user' | 'script')} style={{
                           padding: '6px 14px', borderRadius: 8, border: 'none',
-                          background: gameflowView === v.key ? 'var(--accent)' : 'var(--bg-card)',
-                          color: gameflowView === v.key ? 'var(--accent-fg)' : 'var(--text-muted)',
+                          background: gameflowView === v.key ? (v.key === 'script' ? '#8b5cf6' : 'var(--accent)') : 'var(--bg-card)',
+                          color: gameflowView === v.key ? (v.key === 'script' ? '#fff' : 'var(--accent-fg)') : v.key === 'script' ? '#a78bfa' : 'var(--text-muted)',
                           fontSize: 12, fontWeight: gameflowView === v.key ? 700 : 400,
                           cursor: 'pointer', transition: 'all 0.15s',
+                          outline: v.key === 'script' && gameflowView !== 'script' ? '1px solid rgba(167,139,250,0.3)' : 'none',
                         }}>{v.label}</button>
                       ))}
 
@@ -1994,6 +2005,12 @@ export function ProjectPage() {
                     onChange={handleGameFlowChange}
                     mode="user"
                     projectName={project.name}
+                  />
+                )}
+                {gameflowView === 'script' && hasSurround && (
+                  <AudioScriptTable
+                    script={activeVersion.audioScript}
+                    onChange={handleAudioScriptChange}
                   />
                 )}
               </>
