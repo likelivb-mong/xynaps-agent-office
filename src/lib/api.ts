@@ -831,18 +831,19 @@ export async function callAgent(
   agent: Agent,
   userMessage: string,
   projectContext?: string,
-  options?: { signal?: AbortSignal; timeoutMs?: number }
+  options?: { signal?: AbortSignal; timeoutMs?: number; mode?: 'fast' | 'deep' }
 ): Promise<string> {
+  const mode = options?.mode ?? 'deep'
   const skillContent = buildFileContent(agent.skills)
   const userContent: unknown[] = [
     ...skillContent,
     { type: 'text', text: userMessage }
   ]
 
-  const thinking = resolveThinking('deep')
+  const thinking = resolveThinking(mode)
   const response = await fetchAnthropicWithTimeout({
-    model: resolveModel('deep'),
-    max_tokens: resolveMaxTokens('deep'),
+    model: resolveModel(mode),
+    max_tokens: resolveMaxTokens(mode),
     ...(thinking ? { thinking } : {}),
     system: getSystemPrompt(agent, projectContext),
     messages: [{ role: 'user', content: userContent }],
@@ -1228,7 +1229,7 @@ export async function runFinalReport(
   options?: { signal?: AbortSignal; timeoutMs?: number }
 ): Promise<{ summary: string; detail: string }> {
   const reportsText = reports.map(r =>
-    `## ${r.agentName}\n${r.detail}`
+    `## ${r.agentName}\n${r.summary}`
   ).join('\n\n')
 
 const prompt = `프로젝트 공식 이름은 "${projectName}" 입니다.
@@ -1282,7 +1283,7 @@ HTML 스타일 기준:
   td: padding:8px 12px; font-size:12px; border-bottom:1px solid #1e293b; vertical-align:top; line-height:1.6
 - 배지: border-radius:20px; padding:4px 12px; font-size:11px; font-weight:600`
 
-  const result = await callAgent(pdAgent, prompt, undefined, options)
+  const result = await callAgent(pdAgent, prompt, undefined, { ...options, mode: 'fast' })
   const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|$)/)
   const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
 
