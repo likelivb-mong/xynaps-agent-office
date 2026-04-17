@@ -11,6 +11,7 @@ interface Props {
   onNewVersion: (agentId: string, chatHistory: ChatMessage[], newVersion: DetailVersion) => void
   onChatSave: (agentId: string, chatHistory: ChatMessage[]) => void
   onDeleteVersion?: (agentId: string, versionId: string) => void
+  onSetActiveVersion?: (agentId: string, versionId: string) => void
   projectContext: string
   previousReports: AgentReport[]
   isRunning?: boolean
@@ -106,7 +107,7 @@ function stripOperatingBudgetSectionHtml(input: string): string {
 }
 
 
-export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
+export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, onSetActiveVersion, projectContext, previousReports, isRunning, queuePosition, showRetryFromHere, onRetryFromHere, onRefresh, isRefreshing }: Props) {
   const [showDetail, setShowDetail] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -191,11 +192,11 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
 
   function navigateVersion(dir: 1 | -1) {
     if (versions.length === 0) return
-    let nextIdx = activeVersionIdx === -1
+    const nextIdx = activeVersionIdx === -1
       ? (dir === 1 ? 0 : versions.length - 1)
       : Math.max(0, Math.min(versions.length - 1, activeVersionIdx + dir))
     const targetId = versions[nextIdx]?.id
-    if (targetId) onNewVersion(report.agentId, report.chatHistory ?? [], { ...versions[nextIdx] })
+    if (targetId) onSetActiveVersion?.(report.agentId, targetId)
   }
 
   function saveManualEdit() {
