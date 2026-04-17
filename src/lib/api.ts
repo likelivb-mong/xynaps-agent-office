@@ -290,38 +290,71 @@ function extractBalancedJsonBlock(text: string): string | null {
   return null
 }
 
+function escapeNewlinesInJsonStrings(raw: string): string {
+  let result = ''
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]
+    if (escaped) {
+      result += ch
+      escaped = false
+      continue
+    }
+    if (ch === '\\' && inString) {
+      escaped = true
+      result += ch
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+      result += ch
+      continue
+    }
+    if (inString && ch === '\n') { result += '\\n'; continue }
+    if (inString && ch === '\r') { result += '\\r'; continue }
+    if (inString && ch === '\t') { result += '\\t'; continue }
+    result += ch
+  }
+  return result
+}
+
 function tryParseJsonCandidate(raw: string): unknown {
-  const normalized = raw
-    .trim()
-    .replace(/^\uFEFF/, '')
-    .replace(/^json\s*/i, '')
-    .replace(/,\s*([}\]])/g, '$1')
-    .trim()
+  const normalized = escapeNewlinesInJsonStrings(
+    raw
+      .trim()
+      .replace(/^\uFEFF/, '')
+      .replace(/^json\s*/i, '')
+      .replace(/,\s*([}\]])/g, '$1')
+      .trim()
+  )
   return JSON.parse(normalized)
 }
 
 function normalizeLooseJsonCandidate(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^\uFEFF/, '')
-    .replace(/^json\s*/i, '')
-    .replace(/,\s*([}\]])/g, '$1')
-    .replace(/([{,]\s*)([A-Za-z0-9_\u00C0-\uFFFF]+)\s*:/g, '$1"$2":')
-    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, inner: string) => {
-      const escaped = inner
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-      return `"${escaped}"`
-    })
-    .replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (_match, inner: string) => {
-      const escaped = inner
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, '\\n')
-      return `"${escaped}"`
-    })
-    .trim()
+  return escapeNewlinesInJsonStrings(
+    raw
+      .trim()
+      .replace(/^\uFEFF/, '')
+      .replace(/^json\s*/i, '')
+      .replace(/,\s*([}\]])/g, '$1')
+      .replace(/([{,]\s*)([A-Za-z0-9_\u00C0-\uFFFF]+)\s*:/g, '$1"$2":')
+      .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_match, inner: string) => {
+        const escaped = inner
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\n/g, '\\n')
+        return `"${escaped}"`
+      })
+      .replace(/`([^`\\]*(?:\\.[^`\\]*)*)`/g, (_match, inner: string) => {
+        const escaped = inner
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\n/g, '\\n')
+        return `"${escaped}"`
+      })
+      .trim()
+  )
 }
 
 function parseTaggedBoolean(value: string): boolean {
@@ -587,20 +620,31 @@ ${currentContext}
 - 각 description은 플레이어 관점에서 작성하세요.`
 
   const content: unknown[] = [...fileContent, { type: 'text', text: prompt }]
-  const response = await fetch(resolveEndpoint(), {
-    method: 'POST',
-    headers: resolveApiHeaders(),
-    body: JSON.stringify({
-      model: resolveModel('fast'),
-      max_tokens: resolveMaxTokens('fast'),
-      system,
-      messages: [{ role: 'user', content }],
-    }),
-  })
+  const response = await fetchAnthropicWithTimeout({
+    model: resolveModel('fast'),
+    max_tokens: resolveMaxTokens('fast'),
+    system,
+    messages: [{ role: 'user', content }],
+  }, { timeoutMs: 120000 })
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '외부 파일 반영 실패')
   const text: string = extractText(data)
-  const parsed = parseModelJsonResponse(text) as Record<string, unknown>
+  let parsed: Record<string, unknown>
+  try {
+    parsed = parseModelJsonResponse(text) as Record<string, unknown>
+  } catch {
+    parsed = await repairModelJsonResponse(text, `{
+  "motives": ["..."],
+  "crimeTypes": ["..."],
+  "clues": ["..."],
+  "methods": ["..."],
+  "location": "...",
+  "genres": ["..."],
+  "characters": [{ "role": "가해자", "name": "...", "background": "..." }],
+  "relations": [{ "fromName": "...", "relationType": "원한", "toName": "...", "description": "..." }],
+  "storyFlow": [{ "stage": "기", "roomName": "...", "description": "..." }]
+}`) as Record<string, unknown>
+  }
 
   const charactersRaw = Array.isArray(parsed.characters) ? parsed.characters : []
   const characters: Array<{ id: string; role: CharacterRole; name: string; background: string }> = charactersRaw
