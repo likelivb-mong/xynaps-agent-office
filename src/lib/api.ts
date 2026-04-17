@@ -538,11 +538,12 @@ ${reportsText}
 function toReadableApiError(error: unknown, fallback: string): Error {
   if (error instanceof Error) {
     const message = error.message?.trim() || ''
-    if (error.name === 'AbortError' || /aborted|취소|중지/i.test(message)) {
-      return new Error('작업이 중지되었습니다.')
+    // timeout abort must be checked before generic abort
+    if ((error.name === 'AbortError' && /timeout/i.test(message)) || /timeout|시간 초과/i.test(message)) {
+      return new Error('응답 시간이 초과되었습니다 (AI 생성 시간이 너무 오래 걸렸습니다). 다시 시도해주세요.')
     }
-    if (/timeout|시간 초과/i.test(message)) {
-      return new Error('응답 시간이 너무 오래 걸려 자동 중단되었습니다. 다시 시도해주세요.')
+    if (error.name === 'AbortError' || /aborted|취소|중지/i.test(message)) {
+      return new Error('작업이 중단되었습니다 (페이지 이탈 또는 요청 취소).')
     }
     if (/json parse error|syntaxerror|property name must be a string literal/i.test(message)) {
       return new Error('AI 응답 형식을 정리하지 못했습니다. 다시 시도해주세요.')
@@ -1493,7 +1494,7 @@ ${reportsText}
       ...(thinkingFinal ? { thinking: thinkingFinal } : {}),
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }],
-    }, { timeoutMs: 240000 })
+    }, { timeoutMs: 480000 })
 
     const data = await response.json()
     if (!response.ok) throw new Error(data.error?.message || 'API 오류')
