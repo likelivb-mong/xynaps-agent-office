@@ -8,11 +8,13 @@ import { getProjects, duplicateProject, getAllSkills, getCommonSkills, saveProje
 import type { Project, SkillFile, AgentId, BranchCode } from '../types'
 import { CopyIcon, TrashIcon, WorkflowIcon, WriteIcon, CloseIcon, RefreshIcon } from '../components/ui/Icon'
 import { useAuth } from '../contexts/AuthContext'
+import { useSettings } from '../contexts/SettingsContext'
 
 export function HomePage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, signOut } = useAuth()
+  const { settings } = useSettings()
   const [skills, setSkills] = useState<Record<AgentId, SkillFile[]>>({} as Record<AgentId, SkillFile[]>)
   const [commonSkills, setCommonSkills] = useState<SkillFile[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -177,17 +179,29 @@ export function HomePage() {
             협업 플로우
           </Link>
           <Link to="/settings" title="설정" style={{
-            padding: '6px 12px', borderRadius: 8,
+            padding: '5px 10px', borderRadius: 8,
             border: '1px solid var(--border)',
-            background: 'transparent', color: 'var(--text-muted)',
+            background: 'transparent',
             fontSize: 12, fontWeight: 500, cursor: 'pointer',
-            textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5,
-            transition: 'border-color 0.15s, color 0.15s',
+            textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6,
+            transition: 'border-color 0.15s',
           }}
-            onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.borderColor = 'var(--border-bright)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}
+            onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.borderColor = 'var(--border-bright)' }}
+            onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.borderColor = 'var(--border)' }}
           >
-            ⚙ 설정
+            <span style={{ color: 'var(--text-muted)' }}>⚙</span>
+            <span style={{
+              color: settings.modelQuality === '절약' ? '#22c55e' : settings.modelQuality === '균형' ? '#6f7dff' : '#f59e0b',
+              fontWeight: 600,
+            }}>
+              {settings.modelQuality}
+            </span>
+            {settings.useMax && (
+              <span style={{
+                fontSize: 10, color: '#22c55e', fontWeight: 600,
+                background: 'rgba(34,197,94,0.1)', padding: '1px 5px', borderRadius: 4,
+              }}>Max</span>
+            )}
           </Link>
           {user && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 4 }}>

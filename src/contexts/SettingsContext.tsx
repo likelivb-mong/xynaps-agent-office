@@ -1,19 +1,27 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
-export type ModelTier = '절약' | '균형' | '최고' | 'Max구독연결'
+export type ModelQuality = '절약' | '균형' | '최고'
 
 export interface AppSettings {
-  modelTier: ModelTier
+  modelQuality: ModelQuality
+  useMax: boolean
 }
 
 export const SETTINGS_KEY = 'xynaps_v2_settings'
-export const DEFAULT_SETTINGS: AppSettings = { modelTier: '균형' }
+export const DEFAULT_SETTINGS: AppSettings = { modelQuality: '균형', useMax: false }
 
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return DEFAULT_SETTINGS
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) }
+    const parsed = JSON.parse(raw)
+    // migrate legacy modelTier field
+    if (parsed.modelTier && !parsed.modelQuality) {
+      const tier = parsed.modelTier
+      parsed.modelQuality = tier === 'Max구독연결' ? '최고' : (tier ?? '균형')
+      parsed.useMax = tier === 'Max구독연결'
+    }
+    return { ...DEFAULT_SETTINGS, ...parsed }
   } catch { return DEFAULT_SETTINGS }
 }
 
