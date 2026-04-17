@@ -2203,7 +2203,12 @@ export function ProjectPage() {
                         lineHeight: 1.6,
                       }}>
                         <strong style={{ color: '#f87171' }}>보고서 반영 실패</strong>
-                        <div style={{ marginTop: 4, color: '#cbd5e1' }}>{gameFlowError}</div>
+                        <div style={{ marginTop: 6, color: '#fca5a5', fontSize: 13, fontWeight: 600 }}>{gameFlowError}</div>
+                        {/초과|timeout/i.test(gameFlowError ?? '') && (
+                          <div style={{ marginTop: 6, color: '#94a3b8', fontSize: 12 }}>
+                            보고서 분량이 많을 경우 발생할 수 있습니다. 다시 시도하면 대부분 해결됩니다.
+                          </div>
+                        )}
                       </div>
                     )}
                     <button onClick={generateGameFlow} style={{
