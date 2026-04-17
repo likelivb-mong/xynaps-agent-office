@@ -629,6 +629,7 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
         commonSkills,
         {
           startFromAgentId: agentId,
+          endAtAgentId: agentId,
           seedReports,
           timeoutMs: 240000,
         },
