@@ -748,6 +748,16 @@ export function ProjectPage() {
     return () => window.clearInterval(timer)
   }, [generatingGameFlow])
 
+  useEffect(() => {
+    if (!generatingGameFlow) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = '게임 플로우 생성이 진행 중입니다. 페이지를 나가면 작업이 중단됩니다.'
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [generatingGameFlow])
+
   if (!project) return null
 
   return (
@@ -820,7 +830,10 @@ export function ProjectPage() {
         padding: '14px 28px', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 14,
       }}>
-        <button onClick={() => navigate('/')} style={{
+        <button onClick={() => {
+          if (generatingGameFlow && !window.confirm('게임 플로우 생성이 진행 중입니다. 홈으로 나가면 작업이 중단될 수 있습니다. 계속하시겠습니까?')) return
+          navigate('/')
+        }} style={{
           background: 'none', border: '1px solid var(--border)',
           color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer',
           padding: '5px 10px', borderRadius: 7, transition: 'border-color 0.15s, color 0.15s',
@@ -2130,30 +2143,46 @@ export function ProjectPage() {
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '64px 24px', background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border)' }}>
-                {generatingGameFlow ? (
-                  <>
-                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-                      <Spinner size={32} color="var(--accent)" />
+                {generatingGameFlow ? (() => {
+                  const GF_LOGS = [
+                    { at: 0,  msg: '에이전트 보고서 로드 완료', done: true },
+                    { at: 2,  msg: '섹션·단계 구조 분석 중...', done: false },
+                    { at: 15, msg: 'AI에 게임 플로우 생성 요청 완료', done: true },
+                    { at: 20, msg: 'JSON 플로우 시트 생성 중...', done: false },
+                    { at: 60, msg: '복잡한 구조 처리 중... (정상)', done: false },
+                    { at: 120, msg: '스텝 배치 마무리 중...', done: false },
+                  ]
+                  const fmtT = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`
+                  const visibleLogs = GF_LOGS.filter(l => gameFlowElapsed >= l.at)
+                  return (
+                    <div style={{ textAlign: 'left', maxWidth: 480, margin: '0 auto' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 6px var(--accent)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.08em' }}>GAME FLOW COMPILING</span>
+                        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{fmtT(gameFlowElapsed)}</span>
+                      </div>
+                      <div style={{ background: '#0a0a0d', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', fontFamily: 'monospace', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6, minHeight: 120 }}>
+                        {visibleLogs.map((l, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                            <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{fmtT(l.at)}</span>
+                            <span style={{ color: l.done ? '#c8ff40' : '#909098' }}>{l.done ? '✓' : '›'}</span>
+                            <span style={{ color: l.done ? '#c8ff40' : 'var(--text-secondary)' }}>{l.msg}</span>
+                            {i === visibleLogs.length - 1 && !l.done && (
+                              <span style={{ display: 'inline-block', width: 8, height: 13, background: 'var(--text-muted)', animation: 'pulse 1s ease-in-out infinite', verticalAlign: 'middle', marginLeft: 2 }} />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: 10, height: 3, background: 'var(--bg-secondary)', borderRadius: 99, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', background: 'linear-gradient(90deg, var(--accent), #60b8ff)', borderRadius: 99, animation: 'gameflow-progress 2s ease-in-out infinite', width: '40%' }} />
+                      </div>
+                      <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)', textAlign: 'center' }}>
+                        페이지를 나가면 작업이 중단될 수 있습니다
+                      </div>
+                      <style>{`@keyframes gameflow-progress { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }`}</style>
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>
-                      에이전트 보고서를 게임 플로우에 반영하는 중...
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-                      보고서를 분석하여 섹션·단계별 게임 플로우를 구조화합니다
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', marginBottom: 16 }}>
-                      경과 시간 {formatDuration(gameFlowElapsed)}
-                    </div>
-                    <div style={{ width: 240, height: 3, background: 'var(--bg-secondary)', borderRadius: 99, margin: '0 auto', overflow: 'hidden' }}>
-                      <div style={{
-                        height: '100%', borderRadius: 99,
-                        background: 'var(--accent)',
-                        animation: 'gameflow-progress 2s ease-in-out infinite',
-                        width: '40%',
-                      }} />
-                    </div>
-                    <style>{`@keyframes gameflow-progress { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }`}</style>
-                  </>
+                  )
+                })()
                 ) : (
                   <>
                     <div style={{ fontSize: 40, marginBottom: 16, opacity: 0.25 }}>◈</div>
