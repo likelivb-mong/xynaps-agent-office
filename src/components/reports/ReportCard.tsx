@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
 import { AGENTS } from '../../data/agents'
 import { AgentChatPanel } from './AgentChatPanel'
-import { ChatIcon, EyeIcon, ListIcon, ChevronLeftIcon, ChevronRightIcon, Spinner, RefreshIcon } from '../ui/Icon'
+import { ChatIcon, EyeIcon, ListIcon, ChevronLeftIcon, ChevronRightIcon, Spinner, RefreshIcon, PlayIcon } from '../ui/Icon'
 import { AgentIcon } from '../ui/AgentIcon'
 
 interface Props {
@@ -506,8 +506,8 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
               gap: 7,
             }}
           >
-            <RefreshIcon width={13} height={13} />
-            이 에이전트부터 재실행
+            <PlayIcon width={13} height={13} />
+            여기서부터 전체 재실행
           </button>
         </div>
       )}

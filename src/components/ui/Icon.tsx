@@ -53,6 +53,12 @@ export const RefreshIcon = base(
   'M13 8a5 5 0 11-1.45-3.55M13 8V4.5M13 8h-3.5'
 )
 
+export const PlayIcon = ({ width = 16, height = 16, ...props }: IconProps) => (
+  <svg width={width} height={height} viewBox="0 0 16 16" fill="currentColor" {...props}>
+    <path d="M4 3l10 5-10 5V3z" />
+  </svg>
+)
+
 export const BoxIcon = base(
   'M2 5.5L8 2l6 3.5v5L8 14l-6-3.5v-5z',
   'M8 2v12M2 5.5l6 3.5 6-3.5'
