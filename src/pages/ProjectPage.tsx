@@ -1873,7 +1873,8 @@ export function ProjectPage() {
                       const html = finalDetailSplit.html
                       return (
                         <div
-                          style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}
+                          data-report-html
+                          style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, overflowX: 'auto' }}
                           dangerouslySetInnerHTML={{ __html: stripOperatingBudgetSectionHtml(html) }}
                         />
                       )

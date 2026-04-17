@@ -372,7 +372,7 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
                       }}
                     />
                   ) : detailHtml ? (
-                    <div style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: stripOperatingBudgetSectionHtml(detailHtml) }} />
+                    <div data-report-html style={{ fontSize: 12.5, lineHeight: 1.72, color: 'var(--text-secondary)', overflowX: 'auto' }} dangerouslySetInnerHTML={{ __html: stripOperatingBudgetSectionHtml(detailHtml) }} />
                   ) : (
                     <div style={{
                       fontSize: 12.5,
