@@ -1107,6 +1107,7 @@ export async function runProjectCollaboration(
   commonSkills?: SkillFile[],
   options?: {
     startFromAgentId?: AgentId
+    endAtAgentId?: AgentId
     seedReports?: AgentReport[]
     signal?: AbortSignal
     timeoutMs?: number
@@ -1133,7 +1134,10 @@ export async function runProjectCollaboration(
   if (gameSystemTypes?.includes('crimescene')) extraOrder.push('xfiler')
   const agentOrder: AgentId[] = [...baseOrder, ...extraOrder]
   const startIndex = options?.startFromAgentId ? Math.max(0, agentOrder.indexOf(options.startFromAgentId)) : 0
-  const rerunOrder = agentOrder.slice(startIndex)
+  const endIndex = options?.endAtAgentId ? agentOrder.indexOf(options.endAtAgentId) : -1
+  const rerunOrder = endIndex >= startIndex
+    ? agentOrder.slice(startIndex, endIndex + 1)
+    : agentOrder.slice(startIndex)
 
   for (const seeded of options?.seedReports ?? []) {
     if (seeded.summary?.trim()) {
@@ -1297,7 +1301,7 @@ export async function compileGameFlow(
   onProgress?.('running')
 
   const reportsText = agentReports.map(r =>
-    `### ${r.agentName} (${r.agentId})\n${r.detail}`
+    `### ${r.agentName} (${r.agentId})\n${isMaxMode() ? r.summary : r.detail}`
   ).join('\n\n')
 
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
