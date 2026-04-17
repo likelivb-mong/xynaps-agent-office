@@ -662,9 +662,9 @@ export function ProjectPage() {
   const totalWorkUnits = displayReports.length > 0 ? displayReports.length + 1 : 0
   const finishedUnits = completedReportCount + (generatingFinal ? 0 : (displayFinalClean ? 1 : 0))
   const collaborationElapsedSeconds = collaborationStartedAt ? Math.max(0, Math.floor((progressClock - collaborationStartedAt) / 1000)) : 0
-  const estimatedTotalSeconds = totalWorkUnits > 0 ? (displayReports.length * 42) + 36 : 0
+  const estimatedTotalSeconds = totalWorkUnits > 0 ? (displayReports.length * 42) + 20 : 0
   const estimatedRemainingSeconds = collaborationStartedAt
-    ? Math.max(generatingFinal ? 18 : (running ? 24 : 0), estimatedTotalSeconds - collaborationElapsedSeconds)
+    ? Math.max(generatingFinal ? 8 : (running ? 12 : 0), estimatedTotalSeconds - collaborationElapsedSeconds)
     : estimatedTotalSeconds
   const collaborationPercent = totalWorkUnits > 0
     ? Math.min(100, Math.max(4, Math.round((finishedUnits / totalWorkUnits) * 100)))
