@@ -23,6 +23,77 @@ async function sbDeleteProject(projectId: string): Promise<void> {
   await supabase.from('projects').delete().eq('id', projectId)
 }
 
+// ── Supabase 스킬 동기화 ───────────────────────────────────────────────────────
+
+async function sbUpsertSkill(agentId: string, skill: SkillFile): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { base64, url, ...meta } = skill as SkillFile & { base64?: string; url?: string }
+  await supabase.from('agent_skills').upsert({
+    id: meta.id,
+    owner_id: user.id,
+    agent_id: agentId,
+    name: meta.name,
+    type: meta.type,
+    media_type: meta.mediaType ?? null,
+    guide_prompt: meta.guidePrompt ?? null,
+    knowledge_summary: meta.knowledgeSummary ?? null,
+    enabled: meta.enabled ?? true,
+    uploaded_at: meta.uploadedAt ?? new Date().toISOString(),
+  })
+}
+
+async function sbDeleteSkill(skillId: string): Promise<void> {
+  await supabase.from('agent_skills').delete().eq('id', skillId)
+}
+
+export async function syncSkillsFromSupabase(): Promise<void> {
+  const { data, error } = await supabase
+    .from('agent_skills')
+    .select('agent_id,id,name,type,media_type,guide_prompt,knowledge_summary,enabled,uploaded_at')
+  if (error || !data) return
+
+  const byAgent: Record<string, SkillFile[]> = {}
+  const commonList: SkillFile[] = []
+
+  for (const row of data) {
+    const skill: SkillFile = {
+      id: row.id,
+      name: row.name,
+      type: row.type as SkillFile['type'],
+      mediaType: row.media_type ?? undefined,
+      guidePrompt: row.guide_prompt ?? undefined,
+      knowledgeSummary: row.knowledge_summary ?? undefined,
+      enabled: row.enabled ?? true,
+      uploadedAt: row.uploaded_at,
+    }
+    if (row.agent_id === 'common') {
+      commonList.push(skill)
+    } else {
+      if (!byAgent[row.agent_id]) byAgent[row.agent_id] = []
+      byAgent[row.agent_id].push(skill)
+    }
+  }
+
+  // Merge with local (local wins if same id — local may have base64)
+  const localSkills = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}') as Record<string, SkillFile[]>
+  const localCommon = JSON.parse(localStorage.getItem(COMMON_SKILLS_KEY) || '[]') as SkillFile[]
+
+  const mergedSkills: Record<string, SkillFile[]> = { ...localSkills }
+  for (const [agentId, remoteList] of Object.entries(byAgent)) {
+    const localList = localSkills[agentId] ?? []
+    const localIds = new Set(localList.map(s => s.id))
+    const newFromRemote = remoteList.filter(s => !localIds.has(s.id))
+    mergedSkills[agentId] = [...localList, ...newFromRemote]
+  }
+  localStorage.setItem(SKILLS_KEY, JSON.stringify(mergedSkills))
+
+  const localCommonIds = new Set(localCommon.map(s => s.id))
+  const newCommon = commonList.filter(s => !localCommonIds.has(s.id))
+  localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify([...localCommon, ...newCommon]))
+}
+
 /** Supabase → localStorage 동기화. 앱 로드 시 호출 */
 export async function syncProjectsFromSupabase(): Promise<void> {
   const { data, error } = await supabase
@@ -350,6 +421,7 @@ export function saveAgentSkill(agentId: AgentId, skill: SkillFile): void {
     const { base64, url, ...meta } = skill
     all[agentId].push(meta)
     localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
+    sbUpsertSkill(agentId, skill)
   } catch (e) { console.error(e) }
 }
 
@@ -358,6 +430,7 @@ export function removeAgentSkill(agentId: AgentId, skillId: string): void {
     const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
     if (all[agentId]) all[agentId] = all[agentId].filter((s: SkillFile) => s.id !== skillId)
     localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
+    sbDeleteSkill(skillId)
   } catch (e) { console.error(e) }
 }
 
@@ -399,6 +472,7 @@ export function saveCommonSkill(skill: SkillFile): void {
     const { base64, url, ...meta } = skill
     all.push(meta)
     localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(all))
+    sbUpsertSkill('common', skill)
   } catch (e) { console.error(e) }
 }
 
@@ -407,6 +481,7 @@ export function removeCommonSkill(skillId: string): void {
     localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(
       getCommonSkills().filter(s => s.id !== skillId)
     ))
+    sbDeleteSkill(skillId)
   } catch (e) { console.error(e) }
 }
 
