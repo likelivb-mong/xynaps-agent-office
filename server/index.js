@@ -72,11 +72,13 @@ function callClaudeCli(prompt, res) {
   const errChunks = []
   let settled = false
 
-  const proc = spawn('claude', ['-p', prompt, '--output-format', 'text'], {
+  const proc = spawn('claude', ['-p', '--output-format', 'text'], {
     env: process.env,
     maxBuffer: 20 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   })
+  proc.stdin.write(prompt)
+  proc.stdin.end()
 
   const killTimer = setTimeout(() => {
     if (settled) return
