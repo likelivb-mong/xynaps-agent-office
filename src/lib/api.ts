@@ -1233,57 +1233,47 @@ export async function runFinalReport(
   ).join('\n\n')
 
 const prompt = `프로젝트 공식 이름은 "${projectName}" 입니다.
-문서 안의 프로젝트명 표기는 반드시 "${projectName}"만 사용하세요. 다른 제목이나 대체 이름을 새로 만들지 마세요.
+문서 안의 프로젝트명 표기는 반드시 "${projectName}"만 사용하세요.
 
-다음은 전문 에이전트 팀의 기획 보고서입니다:
+다음은 전문 에이전트 팀의 핵심 요약입니다:
 
 ${reportsText}
 
-위 전체 보고서를 바탕으로 종합적이고 완성도 높은 최종 프로젝트 기획서를 작성하세요.
-단순 요약이 아닌, 모든 에이전트의 핵심 내용을 통합·발전시킨 실제 납품 가능한 수준의 기획 문서여야 합니다.
-
-중요 금지 규칙:
-- "07 운영 · 예산" 섹션 제외
-- "힌트 프로토콜" 및 "예산 추정/견적" 내용 제외
+아래 형식으로 간결한 최종 기획 개요를 작성하세요. 에이전트 보고서를 중복 나열하지 말고, 통합·압축하세요.
 
 [요약]
-프로젝트의 핵심 정체성, 차별점, 플레이 경험을 3~5줄로 요약하세요.
+프로젝트의 핵심 정체성과 플레이 경험을 3줄로 요약하세요.
 
 [상세]
 <!--XYNAPS_HTML-->
-다크 테마 인라인 스타일 HTML로 아래 섹션을 모두 포함하는 완전한 최종 기획서를 작성하세요.
-모든 style은 inline으로만 작성하고, font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif를 사용하세요.
+다크 테마 인라인 스타일 HTML로 아래 3개 섹션만 작성하세요 (간결하게, 불필요한 반복 금지).
+모든 style은 inline, font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif.
+전체 배경: background:#0f172a; color:#e2e8f0; padding:24px; border-radius:16px
 
-반드시 포함할 섹션 (순서 준수):
+① 프로젝트 헤더
+- 프로젝트명(대형 텍스트), 장르·시간·난이도 서브타이틀
+- 핵심 키워드 배지 3~4개 (border-radius:20px; padding:3px 10px; font-size:11px)
+- 플레이타임·섹션수·퍼즐수·난이도 지표 가로 4칸 카드
 
-① 헤더: 프로젝트명(대형), 서브타이틀(장르·시간·난이도), 핵심 키워드 배지 3~5개
+② 게임 플로우 테이블 (핵심)
+- table-layout:fixed; width:100%; border-collapse:collapse
+- 컬럼: 섹션명(20%) | 시간(10%) | 핵심 퍼즐·장치(35%) | 감정 포인트(35%)
+- td: word-break:break-word; padding:8px 10px; font-size:12px; border-bottom:1px solid #1e293b; vertical-align:top
 
-② 핵심 지표 카드 그리드: 총 플레이타임 / 섹션 수 / 퍼즐 수 / 난이도 / 엔딩 수 등
+③ 에이전트 핵심 결론 카드 그리드 (2열)
+- 각 에이전트별 카드: 역할명 + 핵심 결론 1~2줄
+- background:#1e293b; border:1px solid #334155; border-radius:8px; padding:12px`
 
-③ 테마 & 콘셉트: 핵심 감성 키워드, 비주얼 방향성, 콘셉트 핵심 문장
-
-④ 스토리 구조: 등장인물 카드(역할·이름·특성), 기승전반전결 타임라인, 핵심 반전 포인트
-
-⑤ 게임 플로우 & 섹션 구조: 섹션별 타임테이블
-   - 컬럼: 섹션명 | 공간 | 시간(분) | 퍼즐수 | 난이도 | 핵심 행동
-   - 핵심 행동 컬럼은 width:30% 이상, 주요 액션 2~3개를 간결하게 기재
-
-⑥ 퍼즐 시스템: X-KIT / Key / Dev / AUTO 유형별 퍼즐 목록 및 메커니즘 설명
-
-⑦ 공간 설계: 방별 소품·장치·동선 핵심 요약 카드
-
-⑧ 운영 가이드: 브리핑 포인트, GM 체크리스트 핵심 항목, 플레이어 감정 케어 포인트
-
-HTML 스타일 기준:
-- 전체 배경: background:#0f172a; color:#e2e8f0; padding:32px; border-radius:16px
-- 섹션 헤더: font-size:11px; font-weight:700; letter-spacing:0.14em; color:#64748b; margin-bottom:12px
-- 카드: background:#1e293b; border:1px solid #334155; border-radius:10px; padding:16px
-- 테이블: border-collapse:collapse; width:100%; table-layout:fixed
-  th: padding:8px 12px; font-size:11px; color:#64748b; border-bottom:2px solid #334155; text-align:left
-  td: padding:8px 12px; font-size:12px; border-bottom:1px solid #1e293b; vertical-align:top; line-height:1.6
-- 배지: border-radius:20px; padding:4px 12px; font-size:11px; font-weight:600`
-
-  const result = await callAgent(pdAgent, prompt, undefined, { ...options, mode: 'fast' })
+  const skillContent = buildFileContent(pdAgent.skills)
+  const response = await fetchAnthropicWithTimeout({
+    model: MODEL_FAST,
+    max_tokens: 3500,
+    system: getSystemPrompt(pdAgent),
+    messages: [{ role: 'user', content: [...skillContent, { type: 'text', text: prompt }] }],
+  }, options)
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message || 'API 오류')
+  const result = extractText(data)
   const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|$)/)
   const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
 
