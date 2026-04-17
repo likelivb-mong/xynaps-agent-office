@@ -2525,20 +2525,27 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     return { x: Number(xs), y: Number(ys) }
   }
 
-  function getSectionCellSet(section: GameFlowSection): Set<string> {
+  const SKETCH_DEFAULT_MAP_BOXES = [
+    { x: 2, y: 3, w: 12, h: 11 },
+    { x: 15, y: 2, w: 13, h: 12 },
+    { x: 29, y: 3, w: 12, h: 11 },
+    { x: 2, y: 18, w: 20, h: 13 },
+    { x: 24, y: 18, w: 22, h: 13 },
+  ]
+
+  function getSectionCellSet(section: GameFlowSection, index: number): Set<string> {
     if (section.mapCells && section.mapCells.length > 0) return new Set(section.mapCells)
-    if (section.mapBox) {
-      const set = new Set<string>()
-      const bx = Math.max(0, Math.min(COLS - 1, section.mapBox.x))
-      const by = Math.max(0, Math.min(ROWS - 1, section.mapBox.y))
-      const bw = Math.max(1, Math.min(COLS - bx, section.mapBox.w))
-      const bh = Math.max(1, Math.min(ROWS - by, section.mapBox.h))
-      for (let x = bx; x < bx + bw; x += 1) {
-        for (let y = by; y < by + bh; y += 1) set.add(`${x},${y}`)
-      }
-      return set
+    const box = section.mapBox ?? SKETCH_DEFAULT_MAP_BOXES[index % SKETCH_DEFAULT_MAP_BOXES.length]
+    if (!box) return new Set<string>()
+    const set = new Set<string>()
+    const bx = Math.max(0, Math.min(COLS - 1, box.x))
+    const by = Math.max(0, Math.min(ROWS - 1, box.y))
+    const bw = Math.max(1, Math.min(COLS - bx, box.w))
+    const bh = Math.max(1, Math.min(ROWS - by, box.h))
+    for (let x = bx; x < bx + bw; x += 1) {
+      for (let y = by; y < by + bh; y += 1) set.add(`${x},${y}`)
     }
-    return new Set<string>()
+    return set
   }
 
   function getSectionCenter(cells: Set<string>) {
@@ -2574,7 +2581,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   function buildFlowSketchSections(sheet: GameFlowSheet): FlowSketchSection[] {
     return sheet.sections.map((section, index) => {
       const cells: Array<{ x: number; y: number }> = []
-      const set = getSectionCellSet(section)
+      const set = getSectionCellSet(section, index)
       set.forEach(key => {
         const p = parseCellKey(key)
         if (Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.y >= 0 && p.x < COLS && p.y < ROWS) {
@@ -2622,8 +2629,8 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     for (let i = 0; i < sheet.sections.length - 1; i += 1) {
       const current = sheet.sections[i]
       const next = sheet.sections[i + 1]
-      const currentCells = getSectionCellSet(current)
-      const nextCells = getSectionCellSet(next)
+      const currentCells = getSectionCellSet(current, i)
+      const nextCells = getSectionCellSet(next, i + 1)
       const nextCenter = getSectionCenter(nextCells)
       currentCells.forEach(key => {
         if (!nextCells.has(key)) return
@@ -4073,8 +4080,8 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
           onWheel={handleCanvasWheel}
           style={{
             position: 'relative',
-            flex: (!stackPanels && canvasViewW === null) ? 1 : 'none',
-            width: canvasViewW ?? (stackPanels ? '100%' : undefined),
+            flex: 'none',
+            width: canvasViewW ?? (stackPanels ? '100%' : W * canvasZoom),
             overflow: 'auto',
             border: 'none',
             borderRadius: 12,
