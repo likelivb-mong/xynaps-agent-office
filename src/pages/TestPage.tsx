@@ -187,7 +187,6 @@ export function TestPage() {
             const isQueued = isRunning && !isThisRunning && report.status === 'pending'
             const queuePos = isQueued ? reports.slice(0, i).filter(r => r.status === 'pending' || r.agentId === runningAgentId).length : undefined
             const isFailed = report.summary?.includes('오류')
-            const failedIdx = configs.findIndex(c => c.shouldFail && reports.find(r => r.agentId === c.agentId)?.summary?.includes('오류'))
             const canRetry = isFailed
 
             return (
