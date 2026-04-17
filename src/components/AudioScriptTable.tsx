@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import type { AudioScript, AudioScriptTrack, AudioScriptRow, AudioChannel, AudioRowKind } from '../types'
 import { PlusIcon } from './ui/Icon'
 
