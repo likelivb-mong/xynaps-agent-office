@@ -1223,6 +1223,7 @@ export async function runProjectCollaboration(
       cumulativeContext += `\n--- ${agent.name} 기획안 ---\n${summary}\n`
       onProgress(agentId, 'done', result)
     } catch (e) {
+      console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
       const readableError = toReadableApiError(e, `${agent.name} 협업 생성에 실패했습니다.`)
       const report: AgentReport = {
         agentId,
