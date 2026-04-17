@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { marked } from 'marked'
 import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
 import { AGENTS } from '../../data/agents'
@@ -67,6 +67,18 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
     const t = window.setInterval(() => setRefreshElapsed(s => s + 1), 1000)
     return () => window.clearInterval(t)
   }, [isRefreshing])
+
+  const [runningElapsed, setRunningElapsed] = useState(0)
+  useEffect(() => {
+    if (!isRunning) { setRunningElapsed(0); return }
+    const t = window.setInterval(() => setRunningElapsed(s => s + 1), 1000)
+    return () => window.clearInterval(t)
+  }, [isRunning])
+
+  const logScrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (logScrollRef.current) logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight
+  })
 
   const agentDef = AGENTS.find(a => a.id === report.agentId)!
 
@@ -537,99 +549,77 @@ export function ReportCard({ report, onNewVersion, onChatSave, projectContext, p
         </div>
       )}
 
-      {isRunning && (
-        <div style={{
-          position: 'relative',
-          overflow: 'hidden',
-          borderTop: '1px solid var(--border)',
-          padding: '14px 16px 16px',
-          background: 'linear-gradient(180deg, rgba(111,255,163,0.05), rgba(111,255,163,0.015) 60%, transparent 100%)',
-        }}>
-          <div
-            className="project-working-scan"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'linear-gradient(180deg, transparent 0%, rgba(201,255,84,0.12) 45%, transparent 100%)',
-              pointerEvents: 'none',
-            }}
-          />
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="project-working-led" style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                background: '#c9ff54',
-                boxShadow: '0 0 12px rgba(201,255,84,0.7)',
-              }} />
-              <span style={{ fontSize: 12, fontWeight: 800, color: '#efffb8', letterSpacing: '0.06em' }}>
-                AI WORKING MODE
-              </span>
+      {(isRunning || isRefreshing) && (() => {
+        const elapsed = isRefreshing ? refreshElapsed : runningElapsed
+        const fmtTime = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`
+        // Progress: fast at first, asymptotically approaches 95%
+        const progress = Math.min(95, Math.round(95 * (1 - Math.exp(-elapsed / 45))))
+        const LOG_ENTRIES = [
+          { at: 0,   msg: '프로젝트 컨텍스트 로드 완료', ok: true },
+          { at: 1,   msg: '에이전트 역할 프롬프트 구성 완료', ok: true },
+          { at: 3,   msg: '브리핑 문서 병합 및 정제 완료', ok: true },
+          { at: 5,   msg: 'AI 모델에 요청 전송 완료', ok: true },
+          { at: 8,   msg: '모델 응답 스트리밍 수신 중...', ok: false },
+          { at: 30,  msg: '대용량 응답 처리 중... (정상)', ok: false },
+          { at: 90,  msg: '장문 보고서 생성 중... 거의 완료', ok: false },
+          { at: 180, msg: '응답 마무리 중...', ok: false },
+        ]
+        const visible = LOG_ENTRIES.filter(e => elapsed >= e.at)
+        return (
+          <div style={{
+            position: 'relative', overflow: 'hidden',
+            borderTop: '1px solid var(--border)',
+            padding: '14px 16px 16px',
+            background: 'linear-gradient(180deg, rgba(111,255,163,0.05), rgba(111,255,163,0.015) 60%, transparent 100%)',
+          }}>
+            <div className="project-working-scan" style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 0%, rgba(201,255,84,0.12) 45%, transparent 100%)', pointerEvents: 'none' }} />
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, position: 'relative' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="project-working-led" style={{ width: 10, height: 10, borderRadius: '50%', background: '#c9ff54', boxShadow: '0 0 12px rgba(201,255,84,0.7)' }} />
+                <span style={{ fontSize: 12, fontWeight: 800, color: '#efffb8', letterSpacing: '0.06em' }}>AI WORKING MODE</span>
+              </div>
+              <span style={{ fontSize: 11, color: 'rgba(239,255,184,0.7)', fontVariantNumeric: 'tabular-nums' }}>{fmtTime(elapsed)}</span>
             </div>
-            <span style={{ fontSize: 11, color: 'rgba(239,255,184,0.82)', fontWeight: 700 }}>
-              LIVE
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 12, position: 'relative' }}>
-            <div style={{
-              border: '1px solid rgba(201,255,84,0.16)',
-              borderRadius: 12,
-              background: 'rgba(255,255,255,0.02)',
-              padding: '12px 12px 10px',
+            {/* Terminal log */}
+            <div ref={logScrollRef} style={{
+              background: 'rgba(0,0,0,0.35)', borderRadius: 10,
+              border: '1px solid rgba(201,255,84,0.12)',
+              padding: '10px 12px', marginBottom: 10,
+              height: 110, overflowY: 'auto',
+              fontFamily: 'monospace', fontSize: 11,
+              display: 'flex', flexDirection: 'column', gap: 4,
             }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>현재 처리 중</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
-                기획 문맥 정리 및 보고서 초안 생성
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {[
-                  '프로젝트 맥락 로드',
-                  '브리핑 컨텍스트 병합',
-                  '에이전트 역할 프롬프트 생성',
-                  '초안 요약 및 상세 보고서 작성',
-                ].map((line, index) => (
-                  <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: index < 3 ? '#dfe8f8' : 'var(--text-muted)' }}>
-                    <span style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: '50%',
-                      background: index < 3 ? '#c9ff54' : 'rgba(148,163,184,0.5)',
-                    }} />
-                    {line}
-                  </div>
-                ))}
-              </div>
+              {visible.map((e, i) => (
+                <div key={e.at} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', animation: 'log-fadein 0.3s ease' }}>
+                  <span style={{ color: 'rgba(201,255,84,0.5)', flexShrink: 0 }}>{fmtTime(e.at)}</span>
+                  <span style={{ color: e.ok ? '#c9ff54' : '#8ce8ff' }}>{e.ok ? '✓' : '›'}</span>
+                  <span style={{ color: e.ok ? 'rgba(239,255,184,0.8)' : '#e2e8f0' }}>
+                    {e.msg}
+                    {i === visible.length - 1 && !e.ok && <span className="terminal-cursor" style={{ marginLeft: 2, display: 'inline-block', width: 7, height: '1em', background: '#8ce8ff', verticalAlign: 'text-bottom', animation: 'cursor-blink 1s step-end infinite' }} />}
+                  </span>
+                </div>
+              ))}
+              <style>{`
+                @keyframes log-fadein { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+                @keyframes cursor-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+              `}</style>
             </div>
-            <div style={{
-              border: '1px solid rgba(120,148,255,0.14)',
-              borderRadius: 12,
-              background: 'rgba(255,255,255,0.018)',
-              padding: '12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 7,
-            }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>실행 상태</div>
-              <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 700 }}>모델 응답 대기 및 초안 조합</div>
-              <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                <div
-                  className="project-working-progress"
-                  style={{
-                    height: '100%',
-                    width: '58%',
-                    borderRadius: 999,
-                    background: 'linear-gradient(90deg, #c9ff54 0%, #8ce8ff 100%)',
-                  }}
-                />
+            {/* Progress bar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 999,
+                  width: `${progress}%`,
+                  background: 'linear-gradient(90deg, #c9ff54 0%, #8ce8ff 100%)',
+                  transition: 'width 1s ease-out',
+                }} />
               </div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-                에이전트 역할에 맞춰 구조화된 기획안 초안을 생성하고 있습니다.
-              </div>
+              <span style={{ fontSize: 10, color: 'rgba(201,255,84,0.7)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{progress}%</span>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
