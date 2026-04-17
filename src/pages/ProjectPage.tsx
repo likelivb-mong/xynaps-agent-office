@@ -5,7 +5,7 @@ import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersion
 import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
 import { compileGameFlow } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
-import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
+import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, rerunSingleAgent, isSingleAgentRunning, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
 import { GameFlowTable } from '../components/GameFlowTable'
 import { GameFlowMap } from '../components/GameFlowMap'
@@ -138,6 +138,7 @@ export function ProjectPage() {
   const [collaborationStartedAt, setCollaborationStartedAt] = useState<number | null>(null)
   const [progressClock, setProgressClock] = useState(() => Date.now())
   const [collaborationLogs, setCollaborationLogs] = useState<Array<{ id: string; at: string; level: 'info' | 'success' | 'warning' | 'error'; message: string }>>([])
+  const [refreshingAgents, setRefreshingAgents] = useState<Set<AgentId>>(new Set())
   const [draftCrimeEditMode, setDraftCrimeEditMode] = useState(false)
   const [draftCrimeEditError, setDraftCrimeEditError] = useState<string | null>(null)
   const [draftCrimeRaw, setDraftCrimeRaw] = useState({
@@ -338,6 +339,29 @@ export function ProjectPage() {
       setCollaborationStartedAt(Date.parse(snapshot.startedAt))
       setCollaborationLogs(snapshot.logs)
     }
+  }
+
+  function handleRefreshSingleAgent(agentId: AgentId) {
+    if (!project || !activeVersion) return
+    if (running || generatingFinal) return
+    if (isSingleAgentRunning(project.id, agentId)) return
+    setRefreshingAgents(prev => new Set(prev).add(agentId))
+    try {
+      rerunSingleAgent(project.id, activeVersion.id, agentId)
+    } catch {
+      setRefreshingAgents(prev => { const next = new Set(prev); next.delete(agentId); return next })
+      return
+    }
+    // Poll snapshot subscription to detect when this agent finishes
+    const unsubscribe = subscribeCollaboration(project.id, next => {
+      const agentReport = next.reports.find(r => r.agentId === agentId)
+      const stillRunning = next.runningAgentId === agentId || isSingleAgentRunning(project.id, agentId)
+      if (!stillRunning && agentReport?.status === 'done') {
+        setRefreshingAgents(prev => { const s = new Set(prev); s.delete(agentId); return s })
+        reload()
+        unsubscribe()
+      }
+    })
   }
 
   function handleRerunFromAgent(agentId: AgentId) {
@@ -1715,6 +1739,8 @@ export function ProjectPage() {
                   queuePosition={runningAgentId === report.agentId ? undefined : (report.status === 'pending' ? index + 1 : undefined)}
                   showRetryFromHere={report.agentId === firstFailedAgentId}
                   onRetryFromHere={() => handleRerunFromAgent(report.agentId)}
+                  onRefresh={!running && !generatingFinal && report.status === 'done' ? () => handleRefreshSingleAgent(report.agentId) : undefined}
+                  isRefreshing={refreshingAgents.has(report.agentId)}
                   projectContext={`프로젝트: ${project.theme}\n${project.crimeConfig ? `장르: ${project.crimeConfig.genres?.join(', ')} / 장소: ${project.crimeConfig.location}` : ''}`}
                   previousReports={displayReports.filter(r => r.agentId !== report.agentId)}
                   onNewVersion={handleNewVersion}

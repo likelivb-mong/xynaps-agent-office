@@ -3,6 +3,9 @@ import { addVersionToProject, getAllSkills, getCommonSkills, getProjects, update
 import { runFinalReport, runProjectCollaboration } from './api'
 import type { AgentId, AgentReport, FinalReport, Project, ProjectVersion } from '../types'
 
+// Tracks in-flight single-agent refresh jobs: key = `${projectId}:${agentId}`
+const singleAgentJobs = new Map<string, Promise<void>>()
+
 export interface CollaborationSnapshot {
   projectId: string
   versionId: string
@@ -526,4 +529,161 @@ export function hasFailedReports(reports: AgentReport[]): boolean {
 
 export function isFailedAgentReport(report: AgentReport): boolean {
   return isFailedReport(report)
+}
+
+export function isSingleAgentRunning(projectId: string, agentId: AgentId): boolean {
+  return singleAgentJobs.has(`${projectId}:${agentId}`)
+}
+
+export function rerunSingleAgent(projectId: string, versionId: string, agentId: AgentId): { alreadyRunning: boolean } {
+  const jobKey = `${projectId}:${agentId}`
+  if (singleAgentJobs.has(jobKey)) return { alreadyRunning: true }
+  // Don't allow if a full collaboration job is already running for this project
+  if (activeJobs.has(projectId)) return { alreadyRunning: true }
+
+  const project = getProjects().find(item => item.id === projectId)
+  const version = project ? resolveVersion(project, versionId) : null
+  if (!project || !version) throw new Error('버전을 찾을 수 없습니다.')
+
+  const agentOrder = buildActiveAgentIds(project)
+  const agentIndex = agentOrder.indexOf(agentId)
+  const existingReports: AgentReport[] = version.agentReports ?? []
+
+  // Seed reports = all agents that ran before this one (keep their results for context)
+  const seedReports = existingReports.filter(r => agentOrder.indexOf(r.agentId) < agentIndex)
+
+  // Update snapshot: mark only this agent as running
+  const current = snapshots.get(projectId)
+  const baseReports = existingReports.length
+    ? existingReports.map(r =>
+        r.agentId === agentId ? { ...r, status: 'pending' as const, summary: '', detail: '' } : r
+      )
+    : agentOrder.map(id => {
+        const existing = existingReports.find(r => r.agentId === id)
+        if (existing) return existing
+        const def = AGENTS.find(a => a.id === id)!
+        return { agentId: id, agentName: def.name, summary: '', detail: '', status: 'pending' as const }
+      })
+
+  const startedAt = new Date().toISOString()
+  setSnapshot(projectId, {
+    projectId,
+    versionId: version.id,
+    versionName: version.versionName,
+    startedAt: current?.startedAt ?? startedAt,
+    running: false,
+    generatingFinal: false,
+    runningAgentId: agentId,
+    reports: baseReports,
+    finalReport: current?.finalReport ?? version.finalReport ?? null,
+    error: null,
+    logs: [
+      { id: crypto.randomUUID(), at: startedAt, level: 'info', message: `${AGENTS.find(a => a.id === agentId)?.name ?? agentId} 단독 재실행을 시작합니다.` },
+      ...(current?.logs ?? []),
+    ].slice(0, 24),
+  })
+
+  const job = (async () => {
+    try {
+      const freshProject = getProjects().find(item => item.id === projectId)
+      if (!freshProject) throw new Error('프로젝트를 다시 불러오지 못했습니다.')
+
+      const allSkills = getAllSkills()
+      const commonSkills = getCommonSkills()
+
+      // Run collaboration for just this one agent (startFromAgentId = agentId, seedReports = prior agents)
+      // We pass the full existing reports as seed but tell the runner to start from agentId
+      const updatedReports = await runProjectCollaboration(
+        freshProject.name,
+        freshProject.theme,
+        allSkills,
+        (progressAgentId, status, result) => {
+          const snap = snapshots.get(projectId)
+          if (!snap) return
+          if (status === 'running') {
+            setSnapshot(projectId, { ...snap, runningAgentId: progressAgentId })
+            return
+          }
+          const agentDef = AGENTS.find(a => a.id === progressAgentId)
+          const parsed = result ? parseReportResult(result, agentDef?.name ?? progressAgentId) : null
+          const nextReports = snap.reports.map(r =>
+            r.agentId === progressAgentId
+              ? { ...r, summary: parsed?.summary ?? r.summary, detail: parsed?.detail ?? r.detail, status: 'done' as const }
+              : r
+          )
+          const failed = !parsed || parsed.summary.includes('오류')
+          setSnapshot(projectId, { ...snap, runningAgentId: null, reports: nextReports })
+          appendLog(projectId, {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            level: failed ? 'error' : 'success',
+            message: failed
+              ? `${agentDef?.name ?? progressAgentId} 재실행 실패`
+              : `${agentDef?.name ?? progressAgentId} 재실행 완료`,
+          })
+        },
+        freshProject.crimeConfig,
+        freshProject.attachments,
+        freshProject.gameSystemTypes ?? ['escape'],
+        freshProject.briefings,
+        commonSkills,
+        {
+          startFromAgentId: agentId,
+          seedReports,
+          timeoutMs: 240000,
+        },
+      )
+
+      // Merge the refreshed agent result back into the full report list
+      const refreshedAgent = updatedReports.find(r => r.agentId === agentId)
+      if (refreshedAgent) {
+        const mergedReports = existingReports.map(r => r.agentId === agentId ? refreshedAgent : r)
+        // If this agent wasn't in existingReports, append
+        if (!existingReports.find(r => r.agentId === agentId)) mergedReports.push(refreshedAgent)
+        updateVersionReports(projectId, version.id, mergedReports, version.finalReport ?? undefined)
+
+        const afterSnap = snapshots.get(projectId)
+        if (afterSnap) {
+          setSnapshot(projectId, {
+            ...afterSnap,
+            runningAgentId: null,
+            reports: afterSnap.reports.map(r => r.agentId === agentId ? refreshedAgent : r),
+          })
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const agentDef = AGENTS.find(a => a.id === agentId)
+      const errorReport: AgentReport = {
+        agentId,
+        agentName: agentDef?.name ?? agentId,
+        summary: '재실행 중 오류가 발생했습니다',
+        detail: message,
+        status: 'done',
+      }
+      const mergedReports = existingReports.map(r => r.agentId === agentId ? errorReport : r)
+      if (!existingReports.find(r => r.agentId === agentId)) mergedReports.push(errorReport)
+      updateVersionReports(projectId, version.id, mergedReports, version.finalReport ?? undefined)
+      const afterSnap = snapshots.get(projectId)
+      if (afterSnap) {
+        setSnapshot(projectId, {
+          ...afterSnap,
+          runningAgentId: null,
+          reports: afterSnap.reports.map(r => r.agentId === agentId ? errorReport : r),
+          error: message,
+        })
+      }
+      appendLog(projectId, {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        level: 'error',
+        message: `${agentDef?.name ?? agentId} 재실행 실패: ${message}`,
+      })
+    } finally {
+      singleAgentJobs.delete(jobKey)
+    }
+  })()
+
+  singleAgentJobs.set(jobKey, job)
+  return { alreadyRunning: false }
 }
