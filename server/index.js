@@ -75,6 +75,7 @@ function callClaudeCli(prompt, res) {
   const proc = spawn('claude', ['-p', prompt, '--output-format', 'text'], {
     env: process.env,
     maxBuffer: 20 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
 
   const killTimer = setTimeout(() => {
