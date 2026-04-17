@@ -189,6 +189,16 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
             return
           }
 
+          if (status === 'streaming') {
+            setSnapshot(project.id, {
+              ...current,
+              reports: current.reports.map(r =>
+                r.agentId === agentId ? { ...r, detail: result ?? '' } : r
+              ),
+            })
+            return
+          }
+
           const targetAgent = AGENTS.find(agent => agent.id === agentId)
           const parsed = result ? parseReportResult(result, targetAgent?.name ?? agentId) : null
           const nextReports = current.reports.map(report =>
@@ -605,6 +615,15 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
           if (!snap) return
           if (status === 'running') {
             setSnapshot(projectId, { ...snap, runningAgentId: progressAgentId })
+            return
+          }
+          if (status === 'streaming') {
+            setSnapshot(projectId, {
+              ...snap,
+              reports: snap.reports.map(r =>
+                r.agentId === progressAgentId ? { ...r, detail: result ?? '' } : r
+              ),
+            })
             return
           }
           const agentDef = AGENTS.find(a => a.id === progressAgentId)

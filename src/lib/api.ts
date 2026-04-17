@@ -566,7 +566,7 @@ function toReadableApiError(error: unknown, fallback: string): Error {
 
 async function streamMaxModeRequest(
   body: Record<string, unknown>,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void }
 ): Promise<string> {
   const controller = new AbortController()
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
@@ -604,6 +604,7 @@ async function streamMaxModeRequest(
         try { evt = JSON.parse(raw) } catch { continue }
         if (evt.type === 'delta' && evt.text) {
           text += evt.text
+          options?.onChunk?.(text)
         } else if (evt.type === 'error') {
           throw new Error(evt.message || 'CLI 오류')
         }
@@ -617,7 +618,7 @@ async function streamMaxModeRequest(
 
 async function streamAnthropicRequest(
   body: Record<string, unknown>,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void }
 ): Promise<string> {
   const controller = new AbortController()
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
@@ -655,6 +656,7 @@ async function streamAnthropicRequest(
           const evt = JSON.parse(raw)
           if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
             text += evt.delta.text
+            options?.onChunk?.(text)
           }
         } catch { /* skip malformed */ }
       }
@@ -1211,7 +1213,7 @@ export async function runProjectCollaboration(
   projectName: string,
   projectTheme: string,
   agentSkills: Record<string, SkillFile[]>,
-  onProgress: (agentId: AgentId, status: 'running' | 'done', result?: string) => void,
+  onProgress: (agentId: AgentId, status: 'running' | 'streaming' | 'done', result?: string) => void,
   crimeConfig?: CrimeConfig,
   attachments?: SkillFile[],
   gameSystemTypes?: GameSystemType[],
@@ -1291,6 +1293,7 @@ export async function runProjectCollaboration(
       ]
 
       const thinkingOpts = resolveThinking('deep')
+      const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
       const result = isMaxMode()
         // Max mode: stream SSE from local CLI server
         ? await streamMaxModeRequest({
@@ -1299,7 +1302,7 @@ export async function runProjectCollaboration(
             ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
             system: getSystemPrompt(agent, cumulativeContext),
             messages: [{ role: 'user', content: userContent }],
-          }, { signal: options?.signal })
+          }, { signal: options?.signal, onChunk })
         // Direct API: stream SSE from Anthropic
         : await streamAnthropicRequest({
             model: resolveModel('deep'),
@@ -1307,7 +1310,7 @@ export async function runProjectCollaboration(
             ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
             system: getSystemPrompt(agent, cumulativeContext),
             messages: [{ role: 'user', content: userContent }],
-          }, { signal: options?.signal })
+          }, { signal: options?.signal, onChunk })
 
       const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|<!--XYNAPS_HTML-->|$)/)
       const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
