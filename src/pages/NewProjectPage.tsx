@@ -1625,6 +1625,19 @@ export function NewProjectPage() {
     }
   }
 
+  async function handleNextClick() {
+    if (step === 0) {
+      const hasFiles = themeBundleFiles.length > 0 || crimePackFiles.length > 0
+      if (hasFiles) {
+        await applyThemeBundleFiles() // 내부에서 setStep(1) 호출
+      } else {
+        if (canNext) setStep(1)
+      }
+    } else {
+      if (canNext) setStep(step + 1)
+    }
+  }
+
   async function applyThemeBundleFiles() {
     if (themeBundleFiles.length === 0 && crimePackFiles.length === 0) {
       setAutoFillError('가져올 자료를 먼저 추가해주세요.')
@@ -1826,7 +1839,7 @@ export function NewProjectPage() {
             </div>
 
             <div style={card()}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+              <div style={{ marginBottom: 8 }}>
                 <div>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, position: 'relative' }}>
                     <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{hasCrimePackUpload ? '최종 MD 복원하기' : '자료 기반 자동 세팅하기'}</div>
@@ -1907,28 +1920,6 @@ export function NewProjectPage() {
                       : <>형식 제한 없이 올릴 수 있어요. 상세 권장 규칙은 <strong style={{ color: 'var(--text-secondary)' }}>?</strong> 안내에서 확인하세요.</>}
                   </div>
                 </div>
-                <button
-                  aria-label={hasCrimePackUpload ? '최종 MD 복원하기' : '자료 기반 자동 세팅하기'}
-                  title={autoFillBusy ? '자료 반영 중...' : hasCrimePackUpload ? '최종 MD 복원하기' : '자료 기반 자동 세팅하기'}
-                  onClick={applyThemeBundleFiles}
-                  disabled={autoFillBusy}
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 12,
-                    border: `1px solid ${autoFillBusy ? 'var(--border)' : 'var(--border-bright)'}`,
-                    background: autoFillBusy ? 'var(--bg-secondary)' : 'var(--bg-card)',
-                    color: autoFillBusy ? 'var(--text-muted)' : 'var(--accent)',
-                    cursor: autoFillBusy ? 'default' : 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    boxShadow: autoFillBusy ? 'none' : '0 0 0 1px rgba(180,255,80,0.14) inset',
-                  }}
-                >
-                  {autoFillBusy ? <Spinner size={13} color="var(--text-muted)" /> : <DownloadIcon width={16} height={16} />}
-                </button>
               </div>
               <div style={{ marginBottom: 10 }}>
                 <FileUploader
@@ -3027,8 +3018,12 @@ export function NewProjectPage() {
             {step === 0 ? '취소' : '← 이전'}
           </button>
           {step < 2 ? (
-            <button onClick={() => canNext && setStep(step + 1)} disabled={!canNext} style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: canNext ? 'var(--accent)' : 'var(--bg-card)', color: canNext ? '#111111' : 'var(--text-muted)', fontSize: 14, fontWeight: 700, cursor: canNext ? 'pointer' : 'not-allowed' }}>
-              다음 →
+            <button
+              onClick={handleNextClick}
+              disabled={!canNext || autoFillBusy}
+              style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: (canNext && !autoFillBusy) ? 'var(--accent)' : 'var(--bg-card)', color: (canNext && !autoFillBusy) ? '#111111' : 'var(--text-muted)', fontSize: 14, fontWeight: 700, cursor: (canNext && !autoFillBusy) ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {autoFillBusy ? <><Spinner size={12} color="var(--text-muted)" /> 반영 중...</> : step === 0 && (themeBundleFiles.length > 0 || crimePackFiles.length > 0) ? '반영 후 다음 →' : '다음 →'}
             </button>
           ) : (
             <button onClick={handleStart} style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#111111', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
