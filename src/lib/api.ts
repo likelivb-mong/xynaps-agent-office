@@ -701,6 +701,7 @@ async function fetchAnthropicWithTimeout(
   options?: {
     signal?: AbortSignal
     timeoutMs?: number
+    forceDirect?: boolean // Max 모드 무시하고 직접 Anthropic API 사용
   }
 ) {
   assertApiReady()
@@ -712,10 +713,15 @@ async function fetchAnthropicWithTimeout(
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
   options?.signal?.addEventListener('abort', abortForward)
 
+  const endpoint = options?.forceDirect ? 'https://api.anthropic.com/v1/messages' : resolveEndpoint()
+  const headers = options?.forceDirect
+    ? { 'Content-Type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }
+    : resolveApiHeaders()
+
   try {
-    return await fetch(resolveEndpoint(), {
+    return await fetch(endpoint, {
       method: 'POST',
-      headers: resolveApiHeaders(),
+      headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     })
@@ -745,23 +751,12 @@ export async function generateDraftCrimeConfigFromFiles(
   attachments: SkillFile[],
 ): Promise<CrimeConfig> {
   await assertApiReadyAsync()
-  // PDF/이미지 base64가 너무 크면(5MB 초과) 타임아웃 발생 → 파일명 텍스트 블록으로 대체
-  const PDF_SIZE_LIMIT = 5 * 1024 * 1024
-  const oversized: string[] = []
-  const cappedAttachments = (attachments ?? []).map(f => {
-    if ((f.type === 'pdf' || f.type === 'image') && f.base64 && f.base64.length > PDF_SIZE_LIMIT) {
-      oversized.push(f.name)
-      return { ...f, base64: undefined }
-    }
-    return f
-  })
-  const fileContent: unknown[] = buildFileContent(cappedAttachments)
-  if (oversized.length > 0) {
-    fileContent.unshift({
-      type: 'text',
-      text: `[파일 크기 초과 안내] 다음 파일은 용량이 커서 내용 분석 없이 파일명만 참고합니다: ${oversized.join(', ')}`,
-    })
-  }
+  // Max 모드 + 직접 API 키 없음 → 로컬 서버 프록시가 불안정하므로 바이너리 제외
+  // Max 모드 + 직접 API 키 있음 / API 키 모드 → 전체 파일 전송
+  const hasDirectKey = Boolean(API_KEY && API_KEY !== 'your_api_key_here')
+  const fileContent: unknown[] = (isMaxMode() && !hasDirectKey)
+    ? filterBinaryForMaxMode(buildFileContent(attachments ?? []))
+    : buildFileContent(attachments ?? [])
   const currentContext = currentCrimeConfig ? buildCrimeContext(currentCrimeConfig) : '현재 사건 설정 없음'
   const system = `당신은 방탈출/크라임씬 기획 PM입니다.
 첨부 문서를 읽고 사건수사 설정 초안을 JSON으로만 반환하세요.
@@ -804,12 +799,13 @@ ${currentContext}
 - 각 description은 플레이어 관점에서 작성하세요.`
 
   const content: unknown[] = [...fileContent, { type: 'text', text: prompt }]
+  // 직접 API 키가 있으면 Max 모드 프록시를 우회해 Anthropic API로 직접 전송 (안정적 PDF 분석)
   const response = await fetchAnthropicWithTimeout({
     model: resolveModel('fast'),
     max_tokens: resolveMaxTokens('fast'),
     system,
     messages: [{ role: 'user', content }],
-  }, { timeoutMs: 300000 })
+  }, { timeoutMs: 300000, forceDirect: hasDirectKey })
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '외부 파일 반영 실패')
   const text: string = extractText(data)
