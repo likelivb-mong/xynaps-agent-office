@@ -773,6 +773,13 @@ ${currentContext}
 
 반환 JSON 형식:
 {
+  "storyFlow": [
+    { "stage": "기", "roomName": "...", "description": "플레이어가 게임 초반에 처음 알게 되는 정보와 상황" },
+    { "stage": "승", "roomName": "...", "description": "플레이어가 중반에 추가로 발견하는 단서와 전개" },
+    { "stage": "전", "roomName": "...", "description": "플레이어가 위기 또는 핵심 사건을 체감하는 순간" },
+    { "stage": "반전", "roomName": "...", "description": "플레이어가 반전 정보나 진실 일부를 깨닫는 순간" },
+    { "stage": "결", "roomName": "...", "description": "플레이어가 마지막에 도달하는 진실과 결말" }
+  ],
   "motives": ["..."],
   "crimeTypes": ["..."],
   "clues": ["..."],
@@ -784,13 +791,6 @@ ${currentContext}
   ],
   "relations": [
     { "fromName": "...", "relationType": "원한|연인|가족|친구|동료|공모자|피고용|피해|모르는 사이|기타", "toName": "...", "description": "..." }
-  ],
-  "storyFlow": [
-    { "stage": "기", "roomName": "...", "description": "플레이어가 게임 초반에 처음 알게 되는 정보와 상황" },
-    { "stage": "승", "roomName": "...", "description": "플레이어가 중반에 추가로 발견하는 단서와 전개" },
-    { "stage": "전", "roomName": "...", "description": "플레이어가 위기 또는 핵심 사건을 체감하는 순간" },
-    { "stage": "반전", "roomName": "...", "description": "플레이어가 반전 정보나 진실 일부를 깨닫는 순간" },
-    { "stage": "결", "roomName": "...", "description": "플레이어가 마지막에 도달하는 진실과 결말" }
   ]
 }
 
@@ -802,7 +802,7 @@ ${currentContext}
   // 직접 API 키가 있으면 Max 모드 프록시를 우회해 Anthropic API로 직접 전송 (안정적 PDF 분석)
   const response = await fetchAnthropicWithTimeout({
     model: resolveModel('fast'),
-    max_tokens: resolveMaxTokens('fast'),
+    max_tokens: Math.max(resolveMaxTokens('fast'), 3000), // storyFlow 포함 전체 JSON이 잘리지 않도록 최소 3000
     system,
     messages: [{ role: 'user', content }],
   }, { timeoutMs: 300000, forceDirect: hasDirectKey })
