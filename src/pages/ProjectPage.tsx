@@ -1226,46 +1226,42 @@ export function ProjectPage() {
               borderRadius: 0,
               padding: 0,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: isReadonlyDraftView ? 'space-between' : 'flex-end', gap: 8, marginBottom: 4 }}>
-                {isReadonlyDraftView && (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    협업 전 단계의 초안 화면입니다. 완료된 버전이므로 읽기만 가능합니다.
-                  </div>
-                )}
-                {!isReadonlyDraftView && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {draftCrimeEditMode ? '초안 편집 중 · 저장 버튼으로 반영하세요.' : '초안 내용을 확인하세요. ✏️ 버튼으로 편집 가능합니다.'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={() => setDraftCrimeEditMode(v => !v)}
+                    style={{
+                      width: 32, height: 32, borderRadius: 9, border: '1px solid var(--border)',
+                      background: draftCrimeEditMode ? 'var(--accent-dim)' : 'var(--bg-secondary)',
+                      color: draftCrimeEditMode ? 'var(--accent)' : 'var(--text-primary)',
+                      cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                    title={draftCrimeEditMode ? '편집 닫기' : '편집 열기'}
+                  >
+                    <WriteIcon width={13} height={13} />
+                  </button>
+                  {draftCrimeEditMode && (
                     <button
-                      onClick={() => setDraftCrimeEditMode(v => !v)}
+                      onClick={saveDraftCrimeConfigEdits}
                       style={{
-                        width: 32, height: 32, borderRadius: 9, border: '1px solid var(--border)',
-                        background: draftCrimeEditMode ? 'var(--accent-dim)' : 'var(--bg-secondary)',
-                        color: draftCrimeEditMode ? 'var(--accent)' : 'var(--text-primary)',
+                        width: 32, height: 32, borderRadius: 9, border: 'none',
+                        background: 'var(--accent)', color: '#111111',
                         cursor: 'pointer',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}
-                      title={draftCrimeEditMode ? '편집 닫기' : '편집 열기'}
+                      title="편집 저장"
                     >
-                      <WriteIcon width={13} height={13} />
+                      <CheckIcon width={13} height={13} />
                     </button>
-                    {draftCrimeEditMode && (
-                      <button
-                        onClick={saveDraftCrimeConfigEdits}
-                        style={{
-                          width: 32, height: 32, borderRadius: 9, border: 'none',
-                          background: 'var(--accent)', color: '#111111',
-                          cursor: 'pointer',
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        }}
-                        title="편집 저장"
-                      >
-                        <CheckIcon width={13} height={13} />
-                      </button>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
-            {!isReadonlyDraftView && draftCrimeEditMode && (
+            {draftCrimeEditMode && (
               <div style={{
                 background: 'var(--bg-card)', border: '1px solid var(--border)',
                 borderRadius: 14, padding: 12, marginBottom: 12,
