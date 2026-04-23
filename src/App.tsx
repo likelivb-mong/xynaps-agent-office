@@ -14,30 +14,13 @@ import './index.css'
 removeSampleProject()
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: '#0f1117',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#666',
-        fontSize: 14,
-      }}>
-        로딩 중...
-      </div>
-    )
-  }
-  if (!user) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
       <Route path="/new-project" element={<ProtectedRoute><NewProjectPage /></ProtectedRoute>} />
       <Route path="/project/:id" element={<ProtectedRoute><ProjectPage /></ProtectedRoute>} />

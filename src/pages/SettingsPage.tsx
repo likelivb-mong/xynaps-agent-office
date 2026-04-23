@@ -34,17 +34,24 @@ const TABLE_ROWS = [
 export function SettingsPage() {
   const { settings, updateSettings } = useSettings()
   const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('disconnected')
+  const [urlInput, setUrlInput] = useState(settings.localServerUrl || 'http://localhost:3001')
 
   useEffect(() => { checkLocalServer() }, [])
 
   async function checkLocalServer() {
+    const url = settings.localServerUrl || 'http://localhost:3001'
     setServerStatus('checking')
     try {
-      const res = await fetch('http://localhost:3001/api/health', { signal: AbortSignal.timeout(2000) })
+      const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(3000) })
       setServerStatus(res.ok ? 'connected' : 'disconnected')
     } catch {
       setServerStatus('disconnected')
     }
+  }
+
+  function saveUrl() {
+    const trimmed = urlInput.trim().replace(/\/$/, '')
+    updateSettings({ localServerUrl: trimmed })
   }
 
   const selectedQ = settings.modelQuality
@@ -180,7 +187,7 @@ export function SettingsPage() {
         <div style={{
           background: '#1a1d26', border: '1px solid #2a2d36', borderRadius: 12, padding: '16px 18px', marginBottom: 24,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: serverStatus === 'disconnected' ? 12 : 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#64748b' }}>로컬 서버 (Max 구독)</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -189,7 +196,7 @@ export function SettingsPage() {
                   background: serverStatus === 'connected' ? '#22c55e' : serverStatus === 'checking' ? '#f59e0b' : '#ef4444',
                 }} />
                 <span style={{ fontSize: 12, color: serverStatus === 'connected' ? '#22c55e' : '#94a3b8' }}>
-                  {serverStatus === 'connected' ? '연결됨 · http://localhost:3001' : serverStatus === 'checking' ? '확인 중...' : '연결 안됨'}
+                  {serverStatus === 'connected' ? '연결됨' : serverStatus === 'checking' ? '확인 중...' : '연결 안됨'}
                 </span>
               </div>
             </div>
@@ -198,6 +205,26 @@ export function SettingsPage() {
               background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer',
             }}>재확인</button>
           </div>
+
+          {/* Server URL input */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: serverStatus === 'disconnected' ? 12 : 0 }}>
+            <input
+              value={urlInput}
+              onChange={e => setUrlInput(e.target.value)}
+              onBlur={saveUrl}
+              placeholder="http://localhost:3001"
+              style={{
+                flex: 1, padding: '7px 10px', borderRadius: 7,
+                border: '1px solid #2f3447', background: '#0f1117',
+                color: '#e2e8f0', fontSize: 12, outline: 'none',
+              }}
+            />
+            <button onClick={() => { saveUrl(); checkLocalServer() }} style={{
+              padding: '7px 14px', borderRadius: 7, border: '1px solid #2f3447',
+              background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}>연결 확인</button>
+          </div>
+
           {serverStatus === 'disconnected' && (
             <div style={{
               background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.18)',
@@ -205,8 +232,14 @@ export function SettingsPage() {
             }}>
               <strong>서버 시작 방법:</strong><br />
               <code style={{ background: '#0f1117', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
-                cd ~/Downloads/xynaps-agent-office-v2/server && npm install && node index.js
+                cd ~/Downloads/xynaps-agent-office/server && npm start
               </code>
+              <br />
+              <span style={{ color: '#94a3b8' }}>외부 접속 시 ngrok 사용: </span>
+              <code style={{ background: '#0f1117', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
+                ngrok http 3001
+              </code>
+              <span style={{ color: '#94a3b8' }}> → 위 URL란에 입력</span>
             </div>
           )}
         </div>

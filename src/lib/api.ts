@@ -71,9 +71,15 @@ function resolveApiHeaders(): Record<string, string> {
   }
 }
 
+function getServerUrl(): string {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').localServerUrl || 'http://localhost:3001'
+  } catch { return 'http://localhost:3001' }
+}
+
 function resolveEndpoint(): string {
   return isMaxMode()
-    ? 'http://localhost:3001/api/messages'
+    ? `${getServerUrl()}/api/messages`
     : 'https://api.anthropic.com/v1/messages'
 }
 

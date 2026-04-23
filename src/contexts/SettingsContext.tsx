@@ -5,10 +5,11 @@ export type ModelQuality = '절약' | '균형' | '최고'
 export interface AppSettings {
   modelQuality: ModelQuality
   useMax: boolean
+  localServerUrl: string
 }
 
 export const SETTINGS_KEY = 'xynaps_v2_settings'
-export const DEFAULT_SETTINGS: AppSettings = { modelQuality: '균형', useMax: false }
+export const DEFAULT_SETTINGS: AppSettings = { modelQuality: '균형', useMax: false, localServerUrl: 'http://localhost:3001' }
 
 export function loadSettings(): AppSettings {
   try {
