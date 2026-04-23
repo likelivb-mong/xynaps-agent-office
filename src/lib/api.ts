@@ -73,8 +73,8 @@ function resolveApiHeaders(): Record<string, string> {
 
 function getServerUrl(): string {
   try {
-    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').localServerUrl || 'http://localhost:3001'
-  } catch { return 'http://localhost:3001' }
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').localServerUrl || 'https://localhost:3001'
+  } catch { return 'https://localhost:3001' }
 }
 
 function resolveEndpoint(): string {
@@ -674,6 +674,13 @@ async function streamAnthropicRequest(
   }
 }
 
+function assertApiReady() {
+  if (isMaxMode()) return
+  if (!API_KEY || API_KEY === 'your_api_key_here') {
+    throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.')
+  }
+}
+
 async function fetchAnthropicWithTimeout(
   body: unknown,
   options?: {
@@ -681,6 +688,8 @@ async function fetchAnthropicWithTimeout(
     timeoutMs?: number
   }
 ) {
+  assertApiReady()
+
   const controller = new AbortController()
   const timeoutMs = options?.timeoutMs ?? 120000
   const timer = window.setTimeout(() => controller.abort(new DOMException('timeout', 'AbortError')), timeoutMs)
@@ -695,6 +704,14 @@ async function fetchAnthropicWithTimeout(
       body: JSON.stringify(body),
       signal: controller.signal,
     })
+  } catch (e) {
+    if (e instanceof TypeError) {
+      if (isMaxMode()) {
+        throw new TypeError(`로컬 서버(${getServerUrl()})에 연결할 수 없습니다. Claude Max 서버가 실행 중인지 확인하거나, 설정에서 Max 모드를 비활성화해주세요.`)
+      }
+      throw new TypeError('Anthropic API 서버에 연결할 수 없습니다. 인터넷 연결 상태를 확인해주세요.')
+    }
+    throw e
   } finally {
     window.clearTimeout(timer)
     options?.signal?.removeEventListener('abort', abortForward)
