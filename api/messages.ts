@@ -1,63 +1,59 @@
-import https from 'https'
-import type { IncomingMessage, ServerResponse } from 'http'
-
 // Vercel serverless function: proxies Anthropic API calls from the browser
-// Avoids browser CORS restrictions and direct-browser-access header requirements
-export default function handler(req: IncomingMessage & { body?: unknown }, res: ServerResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+export const config = { maxDuration: 60 }
 
+export default async function handler(req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-    res.writeHead(204)
-    return res.end()
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+    })
   }
 
   if (req.method !== 'POST') {
-    res.writeHead(405, { 'Content-Type': 'application/json' })
-    return res.end(JSON.stringify({ error: { message: 'Method not allowed' } }))
+    return new Response(JSON.stringify({ error: { message: 'Method not allowed' } }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    })
   }
 
   const apiKey = process.env.VITE_ANTHROPIC_API_KEY
   if (!apiKey || apiKey === 'your_api_key_here') {
-    res.writeHead(400, { 'Content-Type': 'application/json' })
-    return res.end(JSON.stringify({ error: { message: 'VITE_ANTHROPIC_API_KEY가 서버에 설정되지 않았습니다.' } }))
+    return new Response(
+      JSON.stringify({ error: { message: 'VITE_ANTHROPIC_API_KEY가 서버에 설정되지 않았습니다.' } }),
+      { status: 400, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } },
+    )
   }
 
-  const bodyStr = JSON.stringify(req.body)
-  const options = {
-    hostname: 'api.anthropic.com',
-    path: '/v1/messages',
-    method: 'POST',
-    timeout: 280000,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Length': Buffer.byteLength(bodyStr),
-    },
+  const bodyText = await req.text()
+
+  try {
+    const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: bodyText,
+    })
+
+    const respText = await upstream.text()
+    return new Response(respText, {
+      status: upstream.status,
+      headers: {
+        'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return new Response(
+      JSON.stringify({ error: { message: `업스트림 호출 실패: ${msg}` } }),
+      { status: 502, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } },
+    )
   }
-
-  const upstream = https.request(options, upRes => {
-    res.writeHead(upRes.statusCode ?? 500, { 'Content-Type': 'application/json' })
-    upRes.pipe(res)
-  })
-
-  upstream.on('timeout', () => {
-    upstream.destroy()
-    if (!res.headersSent) {
-      res.writeHead(504, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: { message: '응답 시간이 초과되었습니다. PDF가 너무 크거나 서버가 느릴 수 있습니다. 잠시 후 다시 시도해주세요.' } }))
-    }
-  })
-
-  upstream.on('error', err => {
-    if (!res.headersSent) {
-      res.writeHead(500, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: { message: err.message } }))
-    }
-  })
-
-  upstream.write(bodyStr)
-  upstream.end()
 }
