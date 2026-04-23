@@ -771,15 +771,8 @@ ${currentContext}
 - 빈 항목은 첨부 맥락에 맞게 합리적으로 보완
 - 과장 금지, 실제 파일 근거 중심
 
-반환 JSON 형식:
+반환 JSON 형식 (아래 키 순서를 반드시 지킬 것):
 {
-  "storyFlow": [
-    { "stage": "기", "roomName": "...", "description": "플레이어가 게임 초반에 처음 알게 되는 정보와 상황" },
-    { "stage": "승", "roomName": "...", "description": "플레이어가 중반에 추가로 발견하는 단서와 전개" },
-    { "stage": "전", "roomName": "...", "description": "플레이어가 위기 또는 핵심 사건을 체감하는 순간" },
-    { "stage": "반전", "roomName": "...", "description": "플레이어가 반전 정보나 진실 일부를 깨닫는 순간" },
-    { "stage": "결", "roomName": "...", "description": "플레이어가 마지막에 도달하는 진실과 결말" }
-  ],
   "motives": ["..."],
   "crimeTypes": ["..."],
   "clues": ["..."],
@@ -791,10 +784,20 @@ ${currentContext}
   ],
   "relations": [
     { "fromName": "...", "relationType": "원한|연인|가족|친구|동료|공모자|피고용|피해|모르는 사이|기타", "toName": "...", "description": "..." }
+  ],
+  "storyFlow": [
+    { "stage": "기", "roomName": "...", "description": "플레이어가 게임 초반에 처음 알게 되는 정보와 상황" },
+    { "stage": "승", "roomName": "...", "description": "플레이어가 중반에 추가로 발견하는 단서와 전개" },
+    { "stage": "전", "roomName": "...", "description": "플레이어가 위기 또는 핵심 사건을 체감하는 순간" },
+    { "stage": "반전", "roomName": "...", "description": "플레이어가 반전 정보나 진실 일부를 깨닫는 순간" },
+    { "stage": "결", "roomName": "...", "description": "플레이어가 마지막에 도달하는 진실과 결말" }
   ]
 }
 
 중요:
+- 위 키 순서대로 생성하세요. characters/relations를 반드시 포함한 뒤 storyFlow를 마지막에 작성하세요.
+- characters에는 원문에 등장하는 주요 인물(가해자·피해자·공범·방관자 등)을 모두 포함하세요.
+- relations의 fromName/toName은 반드시 characters의 name과 정확히 일치해야 합니다.
 - storyFlow는 실제 사건의 시간순 정리가 아니라, 플레이어가 게임을 하면서 순서대로 알게 되는 "게임 플레이 스토리 흐름"이어야 합니다.
 - 각 description은 플레이어 관점에서 작성하세요.`
 
@@ -802,7 +805,7 @@ ${currentContext}
   // 직접 API 키가 있으면 Max 모드 프록시를 우회해 Anthropic API로 직접 전송 (안정적 PDF 분석)
   const response = await fetchAnthropicWithTimeout({
     model: resolveModel('fast'),
-    max_tokens: Math.max(resolveMaxTokens('fast'), 3000), // storyFlow 포함 전체 JSON이 잘리지 않도록 최소 3000
+    max_tokens: Math.max(resolveMaxTokens('fast'), 6000), // characters/relations/storyFlow 전체가 잘리지 않도록 최소 6000
     system,
     messages: [{ role: 'user', content }],
   }, { timeoutMs: 300000, forceDirect: hasDirectKey })
