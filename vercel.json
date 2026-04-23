@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/messages.ts": { "maxDuration": 300 }
+    "api/messages.ts": { "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
