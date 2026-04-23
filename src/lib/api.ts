@@ -723,7 +723,9 @@ export async function generateDraftCrimeConfigFromFiles(
   currentCrimeConfig: CrimeConfig | undefined,
   attachments: SkillFile[],
 ): Promise<CrimeConfig> {
-  const fileContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
+  // 파일 분석이 목적이므로 Max 모드에서도 PDF/이미지를 필터링하지 않음
+  // 로컬 서버가 바이너리 콘텐츠를 감지하면 자동으로 Anthropic API로 라우팅함
+  const fileContent = buildFileContent(attachments ?? [])
   const currentContext = currentCrimeConfig ? buildCrimeContext(currentCrimeConfig) : '현재 사건 설정 없음'
   const system = `당신은 방탈출/크라임씬 기획 PM입니다.
 첨부 문서를 읽고 사건수사 설정 초안을 JSON으로만 반환하세요.
