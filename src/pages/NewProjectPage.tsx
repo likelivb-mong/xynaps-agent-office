@@ -1,8 +1,8 @@
-import { useState, useRef, Fragment, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useRef, Fragment, useEffect, useMemo } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { PaperclipIcon, Spinner, DownloadIcon, WriteIcon } from '../components/ui/Icon'
-import { createProject, createDraftVersion } from '../lib/storage'
+import { createProject, createDraftVersion, getProjects, saveProject } from '../lib/storage'
 import { generateDraftCrimeConfigFromFiles, listGoogleDriveFolderMetadata } from '../lib/api'
 import { BRANCH_CODES } from '../data/questData'
 import { CRIME_MOTIVES, CRIME_TYPES, CRIME_CLUES, CRIME_METHODS, GENRES, STORY_STAGES } from '../data/crimeData'
@@ -1077,33 +1077,47 @@ function FileUploader({ files, onChange, label = '참고 파일 첨부', hint = 
 export function NewProjectPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const [step, setStep] = useState(0)
+  const [searchParams] = useSearchParams()
+  const editProjectId = searchParams.get('editProjectId')
+  const editingProject = useMemo(() => {
+    if (!editProjectId) return null
+    return getProjects().find(p => p.id === editProjectId) ?? null
+  }, [editProjectId])
+  const isEditMode = Boolean(editingProject)
+  const [step, setStep] = useState(isEditMode ? 1 : 0)
   const hasDriveApiKey = Boolean(import.meta.env.VITE_GOOGLE_DRIVE_API_KEY)
 
   // Step 1
-  const [name, setName] = useState('')
-  const [theme, setTheme] = useState('')
-  const [branches, setBranches] = useState<BranchCode[]>([])
-  const [gameSystemTypes, setGameSystemTypes] = useState<GameSystemType[]>(['escape'])
+  const [name, setName] = useState(editingProject?.name ?? '')
+  const [theme, setTheme] = useState(editingProject?.theme ?? '')
+  const [branches, setBranches] = useState<BranchCode[]>(editingProject?.branches ?? [])
+  const [gameSystemTypes, setGameSystemTypes] = useState<GameSystemType[]>(editingProject?.gameSystemTypes ?? ['escape'])
 
   // Step 2 — 수사 백과사전
-  const [motives, setMotives] = useState<string[]>([])
-  const [crimeTypes, setCrimeTypes] = useState<string[]>([])
-  const [clues, setClues] = useState<string[]>([])
-  const [methods, setMethods] = useState<string[]>([])
-  const [genres, setGenres] = useState<string[]>([])
-  const [location, setLocation] = useState('')
-  const [characters, setCharacters] = useState<Character[]>([])
-  const [relations, setRelations] = useState<CharacterRelation[]>([])
-  const [storyFlow, setStoryFlow] = useState<StoryStage[]>(
-    STORY_STAGES.map(stage => ({ stage: stage as StoryStageKey, description: '', roomName: '' }))
-  )
+  const [motives, setMotives] = useState<string[]>(editingProject?.crimeConfig?.motives ?? [])
+  const [crimeTypes, setCrimeTypes] = useState<string[]>(editingProject?.crimeConfig?.crimeTypes ?? [])
+  const [clues, setClues] = useState<string[]>(editingProject?.crimeConfig?.clues ?? [])
+  const [methods, setMethods] = useState<string[]>(editingProject?.crimeConfig?.methods ?? [])
+  const [genres, setGenres] = useState<string[]>(editingProject?.crimeConfig?.genres ?? [])
+  const [location, setLocation] = useState(editingProject?.crimeConfig?.location ?? '')
+  const [characters, setCharacters] = useState<Character[]>(editingProject?.crimeConfig?.characters ?? [])
+  const [relations, setRelations] = useState<CharacterRelation[]>(editingProject?.crimeConfig?.relations ?? [])
+  const [storyFlow, setStoryFlow] = useState<StoryStage[]>(() => {
+    const existing = editingProject?.crimeConfig?.storyFlow
+    if (existing && existing.length > 0) {
+      return STORY_STAGES.map(stage => {
+        const match = existing.find(s => s.stage === stage)
+        return match ?? { stage: stage as StoryStageKey, description: '', roomName: '' }
+      })
+    }
+    return STORY_STAGES.map(stage => ({ stage: stage as StoryStageKey, description: '', roomName: '' }))
+  })
   const [floorPlans, setFloorPlans] = useState<SkillFile[]>([])
-  const [attachments, setAttachments] = useState<SkillFile[]>([])
+  const [attachments, setAttachments] = useState<SkillFile[]>(editingProject?.attachments ?? [])
   const [crimePackFiles, setCrimePackFiles] = useState<SkillFile[]>([])
   const [themeBundleFiles, setThemeBundleFiles] = useState<SkillFile[]>([])
-  const [driveFolderLink, setDriveFolderLink] = useState('')
-  const [driveFolderId, setDriveFolderId] = useState<string | null>(null)
+  const [driveFolderLink, setDriveFolderLink] = useState(editingProject?.sourceDriveLink ?? '')
+  const [driveFolderId, setDriveFolderId] = useState<string | null>(editingProject?.sourceDriveFolderId ?? null)
   const [driveLinkError, setDriveLinkError] = useState<string | null>(null)
   const [driveSyncing, setDriveSyncing] = useState(false)
   const [driveSyncSummary, setDriveSyncSummary] = useState<string | null>(null)
@@ -1418,6 +1432,23 @@ export function NewProjectPage() {
     const crimeConfig: CrimeConfig = {
       motives, crimeTypes, clues, methods, location,
       genres: normalizeGenres(genres), characters, relations, storyFlow,
+    }
+    if (editingProject) {
+      const updated = {
+        ...editingProject,
+        name: name.trim(),
+        theme: theme.trim(),
+        branches,
+        gameSystemTypes,
+        crimeConfig,
+        attachments: [...finalFloorPlans, ...finalAttachments],
+        sourceDriveLink: driveFolderLink.trim() || undefined,
+        sourceDriveFolderId: driveFolderId || undefined,
+        updatedAt: new Date().toISOString(),
+      }
+      saveProject(updated)
+      navigate(`/project/${editingProject.id}`)
+      return
     }
     const project = createProject(
       name.trim(),
@@ -1771,9 +1802,11 @@ export function NewProjectPage() {
       `}</style>
 
       <header style={{ padding: '18px 32px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.015)' }}>
-        <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 700, cursor: 'pointer', padding: 0 }}>← 홈</button>
+        <button onClick={() => navigate(isEditMode && editingProject ? `/project/${editingProject.id}` : '/')} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 700, cursor: 'pointer', padding: 0 }}>
+          {isEditMode ? '← 프로젝트' : '← 홈'}
+        </button>
         <span style={{ color: 'var(--border)' }}>|</span>
-        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>새 프로젝트</div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>{isEditMode ? '수사 백과사전 편집' : '새 프로젝트'}</div>
       </header>
 
       <main style={{ padding: '34px 32px 40px', maxWidth: 780, margin: '0 auto', boxSizing: 'border-box' }}>
@@ -3014,8 +3047,15 @@ export function NewProjectPage() {
 
         {/* 하단 버튼 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
-          <button onClick={() => step === 0 ? navigate('/') : setStep(step - 1)} style={{ padding: '10px 24px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 14, cursor: 'pointer' }}>
-            {step === 0 ? '취소' : '← 이전'}
+          <button
+            onClick={() => {
+              if (isEditMode && step === 1 && editingProject) { navigate(`/project/${editingProject.id}`); return }
+              if (step === 0) { navigate('/'); return }
+              setStep(step - 1)
+            }}
+            style={{ padding: '10px 24px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 14, cursor: 'pointer' }}
+          >
+            {(isEditMode && step === 1) || step === 0 ? '취소' : '← 이전'}
           </button>
           {step < 2 ? (
             <button
@@ -3027,7 +3067,7 @@ export function NewProjectPage() {
             </button>
           ) : (
             <button onClick={handleStart} style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#111111', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-              🚀 프로젝트 시작
+              {isEditMode ? '💾 편집 저장' : '🚀 프로젝트 시작'}
             </button>
           )}
         </div>

@@ -13,8 +13,7 @@ import AudioScriptTable from '../components/AudioScriptTable'
 import { MetaStudio } from '../components/MetaStudio'
 import { WorkshopTab } from '../components/workshop/WorkshopTab'
 import { AGENTS } from '../data/agents'
-import { BRANCH_CODES } from '../data/questData'
-import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, AudioScript, ChatMessage, DetailVersion, BranchCode, CrimeConfig, CharacterRole, StoryStageKey } from '../types'
+import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, AudioScript, ChatMessage, DetailVersion } from '../types'
 
 // ─── 브리핑 섹션 ────────────────────────────────────────────────────────────
 function BriefingSection({
@@ -135,26 +134,10 @@ export function ProjectPage() {
   const [showVersionMenu, setShowVersionMenu] = useState(false)
   const [workspaceHistory, setWorkspaceHistory] = useState<Array<{ id: string; savedAt: string; payload: unknown }>>([])
   const [studioMountKey, setStudioMountKey] = useState(0)
-  const [draftMetaName, setDraftMetaName] = useState('')
-  const [draftMetaTheme, setDraftMetaTheme] = useState('')
-  const [draftMetaBranches, setDraftMetaBranches] = useState<BranchCode[]>([])
   const [collaborationStartedAt, setCollaborationStartedAt] = useState<number | null>(null)
   const [progressClock, setProgressClock] = useState(() => Date.now())
   const [collaborationLogs, setCollaborationLogs] = useState<Array<{ id: string; at: string; level: 'info' | 'success' | 'warning' | 'error'; message: string }>>([])
   const [refreshingAgents, setRefreshingAgents] = useState<Set<AgentId>>(new Set())
-  const [draftCrimeEditMode, setDraftCrimeEditMode] = useState(false)
-  const [draftCrimeEditError, setDraftCrimeEditError] = useState<string | null>(null)
-  const [draftCrimeRaw, setDraftCrimeRaw] = useState({
-    genres: '',
-    location: '',
-    motives: '',
-    crimeTypes: '',
-    clues: '',
-    methods: '',
-    characters: '',
-    relations: '',
-    storyFlow: '',
-  })
   const versionMenuRef = useRef<HTMLDivElement>(null)
 
   const PAGE_HISTORY_MAX = 10
@@ -252,41 +235,6 @@ export function ProjectPage() {
     setFinalEditSummary(stripOperatingBudgetSectionText(source?.summary ?? ''))
     setFinalEditDetail((split.plain || cleanedDetail).trim())
   }, [finalReport, activeVersion?.id, activeVersion?.finalReport?.summary, activeVersion?.finalReport?.detail])
-
-  useEffect(() => {
-    if (!project) return
-    setDraftMetaName(project.name ?? '')
-    setDraftMetaTheme(project.theme ?? '')
-    setDraftMetaBranches((project.branches ?? []).slice(0, 1))
-  }, [project?.id, project?.name, project?.theme, project?.branches])
-
-  useEffect(() => {
-    const crime = project?.crimeConfig
-    if (!crime) return
-    const genres = (crime.genres ?? []).join(', ')
-    const location = crime.location ?? ''
-    const motives = (crime.motives ?? []).join('\n')
-    const crimeTypes = (crime.crimeTypes ?? []).join('\n')
-    const clues = (crime.clues ?? []).join('\n')
-    const methods = (crime.methods ?? []).join('\n')
-    const characters = (crime.characters ?? [])
-      .map(c => `${c.role} | ${c.name ?? ''} | ${c.background ?? ''}`)
-      .join('\n')
-    const nameById = new Map((crime.characters ?? []).map(c => [c.id, c.name || c.role]))
-    const relations = (crime.relations ?? [])
-      .map(r => `${nameById.get(r.fromId) ?? ''} | ${r.relationType} | ${nameById.get(r.toId) ?? ''} | ${r.description ?? ''}`)
-      .join('\n')
-    const stageOrder: StoryStageKey[] = ['기', '승', '전', '반전', '결']
-    const stageMap = new Map((crime.storyFlow ?? []).map(s => [s.stage, s]))
-    const storyFlow = stageOrder
-      .map(stage => {
-        const item = stageMap.get(stage)
-        return `${stage} | ${item?.roomName ?? ''} | ${item?.description ?? ''}`
-      })
-      .join('\n')
-    setDraftCrimeRaw({ genres, location, motives, crimeTypes, clues, methods, characters, relations, storyFlow })
-    setDraftCrimeEditError(null)
-  }, [project?.id, project?.crimeConfig])
 
   async function startCollaboration() {
     if (!project) return
@@ -550,93 +498,6 @@ export function ProjectPage() {
       setShowWorkspaceHistory(false)
     } catch {
       setShowWorkspaceHistory(false)
-    }
-  }
-
-  function toggleDraftBranch(code: BranchCode) {
-    setDraftMetaBranches([code])
-  }
-
-  function parseLines(text: string) {
-    return text
-      .split('\n')
-      .map(v => v.trim())
-      .filter(Boolean)
-  }
-
-  function parseCsv(text: string) {
-    return text
-      .split(',')
-      .map(v => v.trim())
-      .filter(Boolean)
-  }
-
-  function saveDraftCrimeConfigEdits() {
-    if (!project) return
-    setDraftCrimeEditError(null)
-    try {
-      const trimmedName = draftMetaName.trim()
-      const trimmedTheme = draftMetaTheme.trim()
-      if (!trimmedName || !trimmedTheme) {
-        setDraftCrimeEditError('프로젝트 이름과 테마를 입력해주세요.')
-        return
-      }
-      const validRoles = new Set<CharacterRole>(['가해자', '피해자', '목격자', '주변인물', '공범', '의뢰인'])
-      const validStages = new Set<StoryStageKey>(['기', '승', '전', '반전', '결'])
-
-      const characters = parseLines(draftCrimeRaw.characters).map(line => {
-        const [roleRaw, nameRaw = '', bgRaw = ''] = line.split('|').map(v => v.trim())
-        const role = validRoles.has(roleRaw as CharacterRole) ? (roleRaw as CharacterRole) : '주변인물'
-        return { id: crypto.randomUUID(), role, name: nameRaw, background: bgRaw }
-      })
-      const nameToId = new Map(characters.map(c => [c.name || c.role, c.id]))
-
-      const relations = parseLines(draftCrimeRaw.relations)
-        .map(line => {
-          const [fromNameRaw = '', relTypeRaw = '', toNameRaw = '', descRaw = ''] = line.split('|').map(v => v.trim())
-          const fromId = nameToId.get(fromNameRaw)
-          const toId = nameToId.get(toNameRaw)
-          if (!fromId || !toId || fromId === toId) return null
-          const relationType = relTypeRaw || '기타'
-          return { id: crypto.randomUUID(), fromId, toId, relationType, description: descRaw }
-        })
-        .filter(Boolean) as CrimeConfig['relations']
-
-      const storyFlowParsed = parseLines(draftCrimeRaw.storyFlow)
-        .map(line => {
-          const [stageRaw = '', roomName = '', description = ''] = line.split('|').map(v => v.trim())
-          if (!validStages.has(stageRaw as StoryStageKey)) return null
-          return { stage: stageRaw as StoryStageKey, roomName, description }
-        })
-        .filter(Boolean) as CrimeConfig['storyFlow']
-      const stageOrder: StoryStageKey[] = ['기', '승', '전', '반전', '결']
-      const byStage = new Map(storyFlowParsed.map(s => [s.stage, s]))
-      const storyFlow = stageOrder.map(stage => byStage.get(stage) ?? { stage, roomName: '', description: '' })
-
-      const nextCrime: CrimeConfig = {
-        motives: parseLines(draftCrimeRaw.motives),
-        crimeTypes: parseLines(draftCrimeRaw.crimeTypes),
-        clues: parseLines(draftCrimeRaw.clues),
-        methods: parseLines(draftCrimeRaw.methods),
-        location: draftCrimeRaw.location.trim(),
-        genres: parseCsv(draftCrimeRaw.genres),
-        characters,
-        relations,
-        storyFlow,
-      }
-
-      saveProject({
-        ...project,
-        name: trimmedName,
-        theme: trimmedTheme,
-        branches: draftMetaBranches.slice(0, 1),
-        crimeConfig: nextCrime,
-        updatedAt: new Date().toISOString(),
-      })
-      setDraftCrimeEditMode(false)
-      reload()
-    } catch (e) {
-      setDraftCrimeEditError(`편집 저장 실패: ${String(e)}`)
     }
   }
 
@@ -1228,118 +1089,27 @@ export function ProjectPage() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {draftCrimeEditMode ? '초안 편집 중 · 저장 버튼으로 반영하세요.' : '초안 내용을 확인하세요. ✏️ 버튼으로 편집 가능합니다.'}
+                  초안 내용을 확인하세요. ✏️ 버튼으로 수사 백과사전 편집 페이지로 이동합니다.
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button
-                    onClick={() => setDraftCrimeEditMode(v => !v)}
+                    onClick={() => navigate(`/new-project?editProjectId=${project.id}`)}
                     style={{
-                      width: 32, height: 32, borderRadius: 9, border: '1px solid var(--border)',
-                      background: draftCrimeEditMode ? 'var(--accent-dim)' : 'var(--bg-secondary)',
-                      color: draftCrimeEditMode ? 'var(--accent)' : 'var(--text-primary)',
+                      padding: '0 12px', height: 32, borderRadius: 9, border: '1px solid var(--border)',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
                       cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      fontSize: 12, fontWeight: 700,
                     }}
-                    title={draftCrimeEditMode ? '편집 닫기' : '편집 열기'}
+                    title="수사 백과사전 편집"
                   >
                     <WriteIcon width={13} height={13} />
+                    <span>편집</span>
                   </button>
-                  {draftCrimeEditMode && (
-                    <button
-                      onClick={saveDraftCrimeConfigEdits}
-                      style={{
-                        width: 32, height: 32, borderRadius: 9, border: 'none',
-                        background: 'var(--accent)', color: '#111111',
-                        cursor: 'pointer',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                      title="편집 저장"
-                    >
-                      <CheckIcon width={13} height={13} />
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
-            {draftCrimeEditMode && (
-              <div style={{
-                background: 'var(--bg-card)', border: '1px solid var(--border)',
-                borderRadius: 14, padding: 12, marginBottom: 12,
-                display: 'flex', flexDirection: 'column', gap: 10,
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-              }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
-                  프로젝트 정보
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: 8 }}>
-                  <input
-                    value={draftMetaName}
-                    onChange={e => setDraftMetaName(e.target.value)}
-                    placeholder="프로젝트 이름"
-                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }}
-                  />
-                  <input
-                    value={draftMetaTheme}
-                    onChange={e => setDraftMetaTheme(e.target.value)}
-                    placeholder="프로젝트 설명/테마"
-                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {BRANCH_CODES.map(code => {
-                    const active = draftMetaBranches.includes(code)
-                    return (
-                      <button
-                        key={code}
-                        onClick={() => toggleDraftBranch(code)}
-                        style={{
-                          padding: '5px 10px',
-                          borderRadius: 7,
-                          border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                          background: active ? 'var(--accent)' : 'transparent',
-                          color: active ? '#111111' : 'var(--text-secondary)',
-                          fontSize: 11,
-                          fontWeight: active ? 700 : 500,
-                          cursor: 'pointer',
-                          fontFamily: 'monospace',
-                          letterSpacing: '0.04em',
-                        }}
-                      >
-                        {code}
-                      </button>
-                    )
-                  })}
-                </div>
-                <div style={{ height: 1, background: 'var(--border)', margin: '2px 0 4px' }} />
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>
-                  초안 기획 요소
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <input
-                    value={draftCrimeRaw.genres}
-                    onChange={e => setDraftCrimeRaw(prev => ({ ...prev, genres: e.target.value }))}
-                    placeholder="장르 (쉼표 구분)"
-                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }}
-                  />
-                  <input
-                    value={draftCrimeRaw.location}
-                    onChange={e => setDraftCrimeRaw(prev => ({ ...prev, location: e.target.value }))}
-                    placeholder="배경 장소"
-                    style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }}
-                  />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <textarea value={draftCrimeRaw.motives} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, motives: e.target.value }))} placeholder="[A] 범행동기 (줄바꿈 구분)" rows={4} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                  <textarea value={draftCrimeRaw.crimeTypes} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, crimeTypes: e.target.value }))} placeholder="[B] 범행종류 (줄바꿈 구분)" rows={4} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                  <textarea value={draftCrimeRaw.clues} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, clues: e.target.value }))} placeholder="[C] 수사단서 (줄바꿈 구분)" rows={4} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                  <textarea value={draftCrimeRaw.methods} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, methods: e.target.value }))} placeholder="[D] 수사기법 (줄바꿈 구분)" rows={4} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                </div>
-                <textarea value={draftCrimeRaw.characters} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, characters: e.target.value }))} placeholder="등장인물 (줄바꿈 구분): 역할 | 이름 | 배경" rows={5} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                <textarea value={draftCrimeRaw.relations} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, relations: e.target.value }))} placeholder="관계도 (줄바꿈 구분): from이름 | 관계타입 | to이름 | 설명" rows={4} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                <textarea value={draftCrimeRaw.storyFlow} onChange={e => setDraftCrimeRaw(prev => ({ ...prev, storyFlow: e.target.value }))} placeholder="게임 플레이 스토리 흐름 (줄바꿈 구분): 기|공간|설명 / 승|공간|설명 / 전|공간|설명 / 반전|공간|설명 / 결|공간|설명" rows={5} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' }} />
-                {draftCrimeEditError && <div style={{ fontSize: 11, color: '#f59e0b' }}>{draftCrimeEditError}</div>}
-              </div>
-            )}
             {project.crimeConfig && (() => {
               const crime = project.crimeConfig!
               const ROLE_COLORS: Record<string, string> = { '가해자': '#e74c3c', '피해자': '#e67e22', '목격자': '#1abc9c', '주변인물': '#95a5a6', '공범': '#9b59b6', '의뢰인': '#27ae60' }
