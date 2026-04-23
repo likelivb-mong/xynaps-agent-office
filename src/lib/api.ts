@@ -745,9 +745,23 @@ export async function generateDraftCrimeConfigFromFiles(
   attachments: SkillFile[],
 ): Promise<CrimeConfig> {
   await assertApiReadyAsync()
-  // 파일 분석이 목적이므로 Max 모드에서도 PDF/이미지를 필터링하지 않음
-  // 로컬 서버가 바이너리 콘텐츠를 감지하면 자동으로 Anthropic API로 라우팅함
-  const fileContent = buildFileContent(attachments ?? [])
+  // PDF/이미지 base64가 너무 크면(5MB 초과) 타임아웃 발생 → 파일명 텍스트 블록으로 대체
+  const PDF_SIZE_LIMIT = 5 * 1024 * 1024
+  const oversized: string[] = []
+  const cappedAttachments = (attachments ?? []).map(f => {
+    if ((f.type === 'pdf' || f.type === 'image') && f.base64 && f.base64.length > PDF_SIZE_LIMIT) {
+      oversized.push(f.name)
+      return { ...f, base64: undefined }
+    }
+    return f
+  })
+  const fileContent: unknown[] = buildFileContent(cappedAttachments)
+  if (oversized.length > 0) {
+    fileContent.unshift({
+      type: 'text',
+      text: `[파일 크기 초과 안내] 다음 파일은 용량이 커서 내용 분석 없이 파일명만 참고합니다: ${oversized.join(', ')}`,
+    })
+  }
   const currentContext = currentCrimeConfig ? buildCrimeContext(currentCrimeConfig) : '현재 사건 설정 없음'
   const system = `당신은 방탈출/크라임씬 기획 PM입니다.
 첨부 문서를 읽고 사건수사 설정 초안을 JSON으로만 반환하세요.
