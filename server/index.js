@@ -12,8 +12,14 @@ const express = require('express')
 const cors = require('cors')
 const { spawn } = require('child_process')
 const https = require('https')
+const fs = require('fs')
+const path = require('path')
 
 const app = express()
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Private-Network', 'true')
+  next()
+})
 app.use(cors({ origin: '*' }))
 app.use(express.json({ limit: '50mb' }))
 
@@ -200,6 +206,7 @@ function proxyToAnthropic(body, apiKey, res) {
     hostname: 'api.anthropic.com',
     path: '/v1/messages',
     method: 'POST',
+    timeout: 280000, // 4분40초 — 클라이언트 5분 타임아웃보다 먼저 끊어 명확한 오류 반환
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
@@ -216,14 +223,26 @@ function proxyToAnthropic(body, apiKey, res) {
     })
   })
 
-  req.on('error', err => res.status(500).json({ error: { message: err.message } }))
+  req.on('timeout', () => {
+    req.destroy()
+    res.status(504).json({ error: { message: 'Anthropic API 응답 시간이 초과되었습니다. PDF가 너무 크거나 서버가 느릴 수 있습니다. 잠시 후 다시 시도해주세요.' } })
+  })
+  req.on('error', err => {
+    if (res.headersSent) return
+    res.status(500).json({ error: { message: err.message } })
+  })
   req.write(bodyStr)
   req.end()
 }
 
 // ── Start ───────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\nXYNAPS 로컬 서버 실행 중 → http://localhost:${PORT}`)
+const sslOptions = {
+  key: fs.readFileSync(path.join(__dirname, 'localhost-key.pem')),
+  cert: fs.readFileSync(path.join(__dirname, 'localhost.pem')),
+}
+
+https.createServer(sslOptions, app).listen(PORT, () => {
+  console.log(`\nXYNAPS 로컬 서버 실행 중 → https://localhost:${PORT}`)
   console.log('Claude Max Pro 구독으로 AI를 무료로 사용합니다.')
   console.log('\n[이미지/PDF] 처리 시 ANTHROPIC_API_KEY 환경변수가 필요합니다.')
   console.log('종료: Ctrl+C\n')

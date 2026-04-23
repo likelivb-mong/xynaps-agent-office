@@ -674,6 +674,21 @@ async function streamAnthropicRequest(
   }
 }
 
+async function assertApiReadyAsync() {
+  if (isMaxMode()) {
+    try {
+      const res = await fetch(`${getServerUrl()}/api/health`, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) throw new Error()
+    } catch {
+      throw new Error(`로컬 서버(${getServerUrl()})에 연결할 수 없습니다. Claude Max 서버가 실행 중인지 확인하거나, 설정에서 Max 모드를 비활성화해주세요.`)
+    }
+    return
+  }
+  if (!API_KEY || API_KEY === 'your_api_key_here') {
+    throw new Error('Anthropic API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.')
+  }
+}
+
 function assertApiReady() {
   if (isMaxMode()) return
   if (!API_KEY || API_KEY === 'your_api_key_here') {
@@ -705,6 +720,12 @@ async function fetchAnthropicWithTimeout(
       signal: controller.signal,
     })
   } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      if (/timeout/i.test(e.message)) {
+        throw new Error('응답 시간이 초과되었습니다. PDF가 너무 크거나 서버가 느릴 수 있습니다. 잠시 후 다시 시도해주세요.')
+      }
+      throw new Error('요청이 중단되었습니다.')
+    }
     if (e instanceof TypeError) {
       if (isMaxMode()) {
         throw new TypeError(`로컬 서버(${getServerUrl()})에 연결할 수 없습니다. Claude Max 서버가 실행 중인지 확인하거나, 설정에서 Max 모드를 비활성화해주세요.`)
@@ -723,6 +744,7 @@ export async function generateDraftCrimeConfigFromFiles(
   currentCrimeConfig: CrimeConfig | undefined,
   attachments: SkillFile[],
 ): Promise<CrimeConfig> {
+  await assertApiReadyAsync()
   // 파일 분석이 목적이므로 Max 모드에서도 PDF/이미지를 필터링하지 않음
   // 로컬 서버가 바이너리 콘텐츠를 감지하면 자동으로 Anthropic API로 라우팅함
   const fileContent = buildFileContent(attachments ?? [])
