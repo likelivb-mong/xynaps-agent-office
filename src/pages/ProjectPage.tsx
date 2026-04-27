@@ -16,9 +16,30 @@ import { AGENTS } from '../data/agents'
 import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, AudioScript, ChatMessage, DetailVersion } from '../types'
 
 // ─── 회의록 카드 ─────────────────────────────────────────────────────────────
+function parseMinutesSections(text: string): { title: string; body: string }[] {
+  const sections: { title: string; body: string }[] = []
+  const lines = text.split('\n')
+  let currentTitle = ''
+  let currentBody: string[] = []
+  for (const line of lines) {
+    const m = line.match(/^##\s+(.+)$/)
+    if (m) {
+      if (currentTitle || currentBody.length) sections.push({ title: currentTitle, body: currentBody.join('\n').trim() })
+      currentTitle = m[1].trim()
+      currentBody = []
+    } else {
+      currentBody.push(line)
+    }
+  }
+  if (currentTitle || currentBody.length) sections.push({ title: currentTitle, body: currentBody.join('\n').trim() })
+  return sections.filter(s => s.title || s.body)
+}
+
 function MinutesCard({ minutes }: { minutes: import('../types').MeetingMinutes }) {
   const [open, setOpen] = useState(false)
   const agentMap = new Map(AGENTS.map(a => [a.id, a]))
+  const sections = parseMinutesSections(minutes.summary)
+  const firstLine = sections[0]?.body.split('\n')[0] ?? minutes.summary.split('\n')[0]
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
       <div
@@ -29,7 +50,7 @@ function MinutesCard({ minutes }: { minutes: import('../types').MeetingMinutes }
           {minutes.order}차 회의록
         </div>
         <div style={{ flex: 1, fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {minutes.summary.split('\n')[0]}
+          {firstLine}
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>
           {new Date(minutes.createdAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -37,10 +58,23 @@ function MinutesCard({ minutes }: { minutes: import('../types').MeetingMinutes }
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
       </div>
       {open && (
-        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-            {minutes.summary}
-          </div>
+        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {sections.length > 0 ? sections.map((s, i) => (
+            <div key={i}>
+              {s.title && (
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid var(--border)' }}>
+                  {s.title}
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.75, whiteSpace: 'pre-wrap' }}>
+                {s.body}
+              </div>
+            </div>
+          )) : (
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+              {minutes.summary}
+            </div>
+          )}
           <details style={{ marginTop: 4 }}>
             <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
               대화 내용 보기 ({minutes.messages.length}개 메시지)

@@ -1164,51 +1164,84 @@ ${isFirstMessage
   }
 }
 
-export async function briefGroupAgents(
-  agentIds: AgentId[],
+export async function briefAsCDFacilitator(
+  specialistAgentIds: AgentId[],
   chatHistory: ChatMessage[],
   projectContext: string,
-): Promise<{ agentId: AgentId; text: string }[]> {
-  const isFirstMessage = chatHistory.length === 0
-  const results = await Promise.all(agentIds.map(async agentId => {
-    const agentDef = AGENTS.find(a => a.id === agentId)!
-    const systemPrompt = `당신은 ${agentDef.emoji} ${agentDef.name}입니다. 역할: ${agentDef.role}
+): Promise<string> {
+  await assertApiReadyAsync()
+  const cd = AGENTS.find(a => a.id === 'ceo')!
+  const specialists = specialistAgentIds
+    .filter(id => id !== 'ceo')
+    .map(id => AGENTS.find(a => a.id === id))
+    .filter(Boolean) as typeof AGENTS
 
-지금은 팀 단체 브리핑 채팅방에서 사용자와 대화 중입니다.
+  const teamRoster = specialists.map(a => `- ${a.emoji} ${a.name} (${a.role}): ${a.description}`).join('\n')
+  const isFirstMessage = chatHistory.length === 0
+
+  const systemPrompt = `당신은 ${cd.emoji} ${cd.name}(${cd.role})입니다.
+지금은 보고서 작성 전 사전 브리핑 회의를 진행 중이며, 당신은 이 회의의 진행자(팀장)입니다.
+
+[참여 팀원]
+${teamRoster}
+
+[당신의 역할]
+- 팀 전체를 대표해 사용자와 대화합니다. 각 팀원이 따로 말하지 않고, 당신이 팀 의견을 종합해 전달합니다.
+- 사용자가 한 번에 답변하기 쉽도록 구조화된 메시지를 작성하세요.
+- 각 팀원의 관점은 [퍼즐 관점], [공간 관점], [운영 관점] 같은 라벨로 분류하세요.
+- 회의를 진행하는 자연스러운 톤(공식적이지만 친근한 한국어)으로 말하세요.
+
+[메시지 작성 규칙]
 ${isFirstMessage
-  ? `보고서 작성 전 당신의 역할에서 꼭 파악해야 할 핵심 질문을 1-2가지만 간결하게 물어보세요. 다른 에이전트들도 각자 질문하므로 너무 길게 쓰지 마세요.`
-  : `사용자의 최근 답변을 바탕으로, 당신의 역할 관점에서 필요한 경우 한 가지 추가 질문을 하거나 간단히 공감하며 확인하세요. 이미 충분히 파악됐다면 "이해했습니다" 처럼 짧게 마무리해도 됩니다.`
+  ? `이번이 첫 메시지입니다. 다음 구조로 작성하세요:
+1. 짧은 인사 + 회의 목적 한 줄
+2. 팀이 함께 확인하고 싶은 핵심 질문 4~6개를 [관점] 라벨로 분류해 번호로 정리
+3. 마무리: "편하게 아는 것부터 답해주시면 됩니다" 같이 부담 없이 답변할 수 있게 안내
+
+질문은 사용자의 결정/취향이 필요한 것 위주로 좁히세요. 일반론은 묻지 마세요.`
+  : `사용자의 최신 답변을 받았습니다. 다음 구조로 작성하세요:
+1. 사용자 답변에서 받은 핵심 인사이트를 1-2줄로 요약·확인
+2. 팀이 추가로 좁히고 싶은 후속 질문 2~4개를 [관점] 라벨로 분류해 번호로 정리
+   - 답변에서 모순/공백이 있으면 그 부분 먼저 짚기
+   - 충분히 파악된 영역은 다시 묻지 않기
+3. 마무리: 자연스럽게 다음 답변 유도
+
+이미 모든 필요 정보가 충분히 모였다면, 추가 질문 없이 "이번 브리핑으로 보고서 작성에 필요한 정보는 충분히 모인 것 같습니다. 우측 하단의 '브리핑 완료'를 눌러주세요." 라고 안내하세요.`
 }
 
-현재 프로젝트 맥락: ${projectContext}
+[제약]
+- 마크다운 굵게(**) 표기는 사용하되, 다른 마크다운(코드블록, 인용 등)은 금지
+- 최대 600자 이내
+- 결과 텍스트만 출력 (메타 설명 금지)
 
-50-150자 이내로 간결하게, 대화체로 응답하세요. HTML 없이 작성하세요.`
+[현재 프로젝트 맥락]
+${projectContext}`
 
-    const messages = chatHistory.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }))
-    if (isFirstMessage) messages.push({ role: 'user', content: '안녕하세요, 브리핑을 시작해주세요.' })
-
-    try {
-      const response = await fetch(resolveEndpoint(), {
-        method: 'POST',
-        headers: resolveApiHeaders(),
-        body: JSON.stringify({
-          model: MODEL_FAST,
-          max_tokens: 400,
-          system: systemPrompt,
-          messages,
-        }),
-      })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error?.message || '오류')
-      return { agentId, text: extractText(data).trim() }
-    } catch {
-      return { agentId, text: '' }
-    }
+  const messages = chatHistory.map(m => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.content,
   }))
-  return results.filter(r => r.text)
+  if (isFirstMessage) messages.push({ role: 'user', content: '회의를 시작해주세요.' })
+
+  try {
+    const response = await fetch(resolveEndpoint(), {
+      method: 'POST',
+      headers: resolveApiHeaders(),
+      body: JSON.stringify({
+        model: MODEL_FAST,
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages,
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error?.message || '브리핑 응답 실패')
+    const text = extractText(data).trim()
+    if (!text) throw new Error('브리핑 응답이 비어 있습니다.')
+    return text
+  } catch (error) {
+    throw toReadableApiError(error, '브리핑 응답을 가져오지 못했습니다.')
+  }
 }
 
 export async function generateMeetingMinutes(
@@ -1224,19 +1257,47 @@ export async function generateMeetingMinutes(
   const conversation = messages.map(m => {
     if (m.role === 'user') return `[사용자] ${m.content}`
     const a = AGENTS.find(ag => ag.id === m.agentId)
-    const label = a ? `${a.emoji} ${a.name}` : '에이전트'
+    const label = a ? `${a.emoji} ${a.name}` : '진행자'
     return `[${label}] ${m.content}`
-  }).join('\n')
+  }).join('\n\n')
 
   const response = await fetchAnthropicWithTimeout({
     model: MODEL_FAST,
-    max_tokens: 1000,
-    system: '당신은 기획 회의록 작성 전문가입니다. 브리핑 대화를 바탕으로 핵심 논의 내용을 구조적으로 정리합니다.',
+    max_tokens: 2000,
+    system: '당신은 방탈출/크라임씬 기획 회의록 작성 전문가입니다. 브리핑 대화를 분석해 보고서 작성에 활용할 수 있는 정확하고 구조적인 회의록을 작성합니다.',
     messages: [{
       role: 'user',
-      content: `${projectContext}\n\n참여 에이전트: ${agentNames}\n\n브리핑 대화:\n${conversation}\n\n위 대화를 회의록으로 정리해주세요.\n- 사용자가 전달한 주요 정보와 결정사항 중심\n- 에이전트별 확인 사항\n- 마크다운 없이 간결하게 (300자 이내)\n- 회의록 텍스트만 출력`,
+      content: `${projectContext}
+
+참여 팀: ${agentNames}
+
+다음 회의 대화를 분석해서 회의록을 작성해주세요.
+
+=== 대화 내역 ===
+${conversation}
+=== 끝 ===
+
+다음 형식으로 회의록을 작성하세요 (마크다운 ## 헤더 사용):
+
+## 핵심 결정사항
+사용자가 명확히 결정·확정한 내용들을 항목별 불릿으로 (3-7개)
+
+## 영역별 합의 내용
+[퍼즐] / [공간] / [운영] / [음향] / [스토리] 등 관련 영역별로 사용자가 답변·확인한 내용을 정리. 각 영역 2-4줄.
+
+## 미해결 / 추가 확인 필요
+회의에서 다뤘으나 결론이 안 난 항목, 또는 보고서 작성 중 추가 결정이 필요한 항목 (있으면)
+
+## 보고서 작성 시 반영 포인트
+이 회의 내용이 각 에이전트 보고서에 어떻게 반영되어야 하는지 핵심 지침 (3-5개)
+
+규칙:
+- 마크다운 헤더 외 다른 형식(코드블록, 표 등)은 금지
+- 추측 금지, 대화에서 명시된 내용만 정리
+- 사용자가 답변하지 않은 영역은 누락하거나 "미정"으로 표기
+- 간결하지만 보고서 작성에 충분한 정보 (700~1500자)`,
     }],
-  }, { timeoutMs: 30000 })
+  }, { timeoutMs: 60000 })
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '회의록 생성 실패')
   return extractText(data).trim()

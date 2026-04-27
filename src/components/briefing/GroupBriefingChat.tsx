@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import type { Agent, ChatMessage, MeetingMinutes } from '../../types'
 import type { AgentId } from '../../types'
-import { briefGroupAgents, generateMeetingMinutes } from '../../lib/api'
+import { briefAsCDFacilitator, generateMeetingMinutes } from '../../lib/api'
 import { saveGroupBriefing, completeGroupBriefing } from '../../lib/storage'
 import { AgentIcon } from '../ui/AgentIcon'
 import { Spinner } from '../ui/Icon'
@@ -14,6 +14,27 @@ interface Props {
   initialMessages?: ChatMessage[]
   initialCompleted?: boolean
   onUpdate: () => void
+}
+
+// **굵게** 처리 + [관점] 라벨에 색상 강조
+function renderBriefingContent(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  const regex = /(\*\*[^*]+\*\*|\[[^\]]+\])/g
+  let last = 0
+  let m: RegExpExecArray | null
+  let key = 0
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    const token = m[0]
+    if (token.startsWith('**')) {
+      parts.push(<strong key={key++} style={{ color: 'var(--accent)' }}>{token.slice(2, -2)}</strong>)
+    } else {
+      parts.push(<span key={key++} style={{ display: 'inline-block', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: 'rgba(180,255,80,0.13)', color: 'var(--accent)', marginRight: 3 }}>{token}</span>)
+    }
+    last = m.index + token.length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
 }
 
 export function GroupBriefingChat({
@@ -41,16 +62,16 @@ export function GroupBriefingChat({
     setLoading(true)
     setError(null)
     try {
-      const results = await briefGroupAgents(agentIds, [], projectContext)
-      const agentMsgs: ChatMessage[] = results.map(r => ({
+      const text = await briefAsCDFacilitator(agentIds, [], projectContext)
+      const cdMsg: ChatMessage = {
         id: crypto.randomUUID(),
-        role: 'assistant' as const,
-        content: r.text,
-        agentId: r.agentId,
+        role: 'assistant',
+        content: text,
+        agentId: 'ceo',
         createdAt: new Date().toISOString(),
-      }))
-      setMessages(agentMsgs)
-      saveGroupBriefing(projectId, agentIds, agentMsgs)
+      }
+      setMessages([cdMsg])
+      saveGroupBriefing(projectId, agentIds, [cdMsg])
     } catch (e) {
       setError(e instanceof Error ? e.message : '브리핑 시작에 실패했습니다.')
     }
@@ -75,20 +96,20 @@ export function GroupBriefingChat({
     setLoading(true)
     setError(null)
     try {
-      const results = await briefGroupAgents(agentIds, withUser, projectContext)
-      const agentMsgs: ChatMessage[] = results.map(r => ({
+      const cdText = await briefAsCDFacilitator(agentIds, withUser, projectContext)
+      const cdMsg: ChatMessage = {
         id: crypto.randomUUID(),
-        role: 'assistant' as const,
-        content: r.text,
-        agentId: r.agentId,
+        role: 'assistant',
+        content: cdText,
+        agentId: 'ceo',
         createdAt: new Date().toISOString(),
-      }))
-      const final = [...withUser, ...agentMsgs]
+      }
+      const final = [...withUser, cdMsg]
       setMessages(final)
       saveGroupBriefing(projectId, agentIds, final)
       onUpdate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : '에이전트 답변을 가져오지 못했습니다.')
+      setError(e instanceof Error ? e.message : 'CD 답변을 가져오지 못했습니다.')
     }
     setLoading(false)
   }
@@ -173,8 +194,8 @@ export function GroupBriefingChat({
           )}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>팀 브리핑 채팅</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{agents.length}명 에이전트 참여</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>팀 브리핑 회의</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>크리에이티브 디렉터(진행) · {agents.length}명 팀원 참여</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {roundCount > 0 && !completed && (
@@ -200,39 +221,41 @@ export function GroupBriefingChat({
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {messages.length === 0 && loading && (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, marginTop: 60 }}>
-                에이전트들 준비 중...
+                팀 의견 취합 중... CD가 곧 회의를 시작합니다
               </div>
             )}
             {messages.map(msg => {
               const agentDef = msg.agentId ? agentMap.get(msg.agentId) : null
+              const isCD = msg.role === 'assistant' && msg.agentId === 'ceo'
               return (
                 <div key={msg.id} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   {msg.role === 'assistant' && agentDef && (
                     <div style={{
-                      width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                      width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
                       background: agentDef.color + '22', border: `1.5px solid ${agentDef.color}55`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      marginRight: 6, marginTop: 2,
+                      marginRight: 8, marginTop: 2,
                     }}>
-                      <AgentIcon agentId={agentDef.id} width={11} height={11} />
+                      <AgentIcon agentId={agentDef.id} width={13} height={13} />
                     </div>
                   )}
                   <div style={{
-                    maxWidth: '76%',
+                    maxWidth: isCD ? '88%' : '76%',
                     background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-secondary)',
-                    border: msg.role === 'assistant' ? '1px solid var(--border)' : 'none',
+                    border: msg.role === 'assistant' ? `1px solid ${agentDef?.color}33` : 'none',
                     borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                    padding: '8px 12px',
-                    fontSize: 12, lineHeight: 1.6,
+                    padding: isCD ? '12px 14px' : '8px 12px',
+                    fontSize: 12, lineHeight: 1.7,
                     color: msg.role === 'user' ? '#111111' : 'var(--text-primary)',
                     whiteSpace: 'pre-wrap', fontWeight: msg.role === 'user' ? 700 : 500,
                   }}>
                     {msg.role === 'assistant' && agentDef && (
-                      <div style={{ fontSize: 10, fontWeight: 700, color: agentDef.color, marginBottom: 3 }}>
-                        {agentDef.emoji} {agentDef.name}
+                      <div style={{ fontSize: 10, fontWeight: 800, color: agentDef.color, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span>{agentDef.emoji} {agentDef.name}</span>
+                        {isCD && <span style={{ fontSize: 9, fontWeight: 600, background: agentDef.color + '22', color: agentDef.color, padding: '1px 6px', borderRadius: 4 }}>회의 진행</span>}
                       </div>
                     )}
-                    {msg.content}
+                    {renderBriefingContent(msg.content)}
                   </div>
                 </div>
               )
@@ -244,22 +267,35 @@ export function GroupBriefingChat({
                 </div>
               </div>
             )}
-            {loading && messages.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 6 }}>
-                <div style={{ display: 'flex' }}>
-                  {agents.slice(0, 3).map(a => (
-                    <div key={a.id} style={{ width: 18, height: 18, borderRadius: '50%', background: a.color + '22', border: `1px solid ${a.color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: -4 }}>
-                      <AgentIcon agentId={a.id} width={9} height={9} />
+            {loading && messages.length > 0 && (() => {
+              const cdAgent = agentMap.get('ceo')
+              return (
+                <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start', gap: 6 }}>
+                  {cdAgent && (
+                    <div style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, background: cdAgent.color + '22', border: `1.5px solid ${cdAgent.color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+                      <AgentIcon agentId="ceo" width={11} height={11} />
                     </div>
-                  ))}
+                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>팀 의견 취합 중</span>
+                      <div style={{ display: 'flex' }}>
+                        {agents.filter(a => a.id !== 'ceo').slice(0, 5).map((a, i) => (
+                          <div key={a.id} style={{ width: 14, height: 14, borderRadius: '50%', background: a.color + '22', border: `1px solid ${a.color}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: i === 0 ? 0 : -3 }}>
+                            <AgentIcon agentId={a.id} width={7} height={7} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '12px 12px 12px 2px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span className="briefing-typing-dot" />
+                      <span className="briefing-typing-dot" />
+                      <span className="briefing-typing-dot" />
+                    </div>
+                  </div>
                 </div>
-                <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '12px 12px 12px 2px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span className="briefing-typing-dot" />
-                  <span className="briefing-typing-dot" />
-                  <span className="briefing-typing-dot" />
-                </div>
-              </div>
-            )}
+              )
+            })()}
             <div ref={messagesEndRef} />
           </div>
 
