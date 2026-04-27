@@ -956,7 +956,8 @@ function getSystemPrompt(agent: Agent, projectContext?: string): string {
   const roleGuide: Record<string, string> = {
     ceo: `당신은 방탈출 테마 기획의 총괄 크리에이티브 디렉터입니다.
 담당 영역: 테마 정체성·감성 방향 설정, 장르 전략, 핵심 콘셉트 정의.
-도면과 첨부파일이 있는 경우 반드시 분석하여 공간 구조를 파악하세요.`,
+입력 우선순위: (1) 사용자 브리핑·테마 정보·이전 단계 산출물 (2) 도면·첨부파일(선택).
+첨부가 제공된 경우에만 분석하고, 없으면 (1)만으로 즉시 진행하세요. 첨부 부재는 정상 케이스이며, 사용자에게 파일·권한·진행 방향을 되묻지 마세요.`,
     concept: `당신은 방탈출 스토리 아키텍트입니다.
 담당 영역: 세계관, 등장인물 핵심 설정·관계, 사건 타임라인, 서사 구조.
 핵심 정보를 명확하고 간결하게 전달하세요. 장황한 서술 없이 핵심만 담으세요.`,
@@ -1007,7 +1008,12 @@ ${QUALITY_DIRECTIVE}
 중요 금지 규칙:
 - "07 운영 · 예산" 섹션을 생성하지 마세요.
 - "힌트 프로토콜" 및 "예산 추정/견적" 항목을 보고서에서 기획하지 마세요.
-- 위 내용이 기존 맥락에 있더라도 최종 결과에서는 제외하세요.`
+- 위 내용이 기존 맥락에 있더라도 최종 결과에서는 제외하세요.
+
+입력 처리 원칙(필독):
+- 첨부 파일·외부 링크(Google Drive·PDF 등)는 *선택* 참조 자료입니다. 없거나 접근 불가하면 위 프로젝트 맥락(테마·브리핑·이전 에이전트 산출물)만으로 즉시 산출물을 생성하세요.
+- 사용자에게 추가 정보·파일·권한·진행 방향을 *되묻지 마세요*. "공유해주시면", "허용해주시면", "어떤 작업을 진행하실 건가요", "말씀해주시면" 같은 문구로 답을 끝내지 마세요.
+- 정보가 부족한 부분은 합리적 가정을 세우고 본문에 "가정:" 으로 명시한 뒤 그대로 진행하세요. 안내문이나 사과문이 아닌, 실제 산출물(HTML 기획안)을 반드시 생성하세요.`
 }
 
 export async function callAgent(
@@ -1411,6 +1417,34 @@ ${HTML_STYLE_GUIDE}`,
 ${HTML_STYLE_GUIDE}`,
 }
 
+// 에이전트 산출물이 "권한 없음/되묻기" 안내문에 갇혔는지 탐지.
+// 첨부 부재를 이유로 모델이 작업을 거부하고 사용자에게 질문만 던지는 패턴을 잡는다.
+function looksLikePlaceholder(text: string | undefined | null): boolean {
+  if (!text) return true
+  const trimmed = text.trim()
+  if (trimmed.length < 200) return true
+  const phrases = [
+    'Google Drive 접근',
+    'Google Drive 권한',
+    '권한이 필요',
+    '권한을 허용',
+    '권한이 아직 허용',
+    'PDF 파일을 직접',
+    '파일을 직접 공유',
+    '어떤 작업을 진행',
+    '진행하실 건가요',
+    '말씀해주시면 바로 시작',
+    '말씀해주시면 시작',
+    '파일을 읽어 분석',
+    '내용을 분석하겠습니다',
+  ]
+  const hits = phrases.filter(p => trimmed.includes(p)).length
+  // 2개 이상 매칭 → placeholder 거의 확실. 짧은 본문(<800자)이면 1개로도 의심.
+  if (hits >= 2) return true
+  if (hits >= 1 && trimmed.length < 800) return true
+  return false
+}
+
 export async function runProjectCollaboration(
   projectName: string,
   projectTheme: string,
@@ -1496,23 +1530,35 @@ export async function runProjectCollaboration(
 
       const thinkingOpts = resolveThinking('deep')
       const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
-      const result = isMaxMode()
-        // Max mode: stream SSE from local CLI server
-        ? await streamMaxModeRequest({
-            model: resolveModel('deep'),
-            max_tokens: resolveMaxTokens('deep'),
-            ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
-            system: getSystemPrompt(agent, cumulativeContext),
-            messages: [{ role: 'user', content: userContent }],
-          }, { signal: options?.signal, onChunk })
-        // Direct API: stream SSE from Anthropic
-        : await streamAnthropicRequest({
-            model: resolveModel('deep'),
-            max_tokens: resolveMaxTokens('deep'),
-            ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
-            system: getSystemPrompt(agent, cumulativeContext),
-            messages: [{ role: 'user', content: userContent }],
-          }, { signal: options?.signal, onChunk })
+      const runOnce = async (content: unknown[]) => {
+        const reqBody = {
+          model: resolveModel('deep'),
+          max_tokens: resolveMaxTokens('deep'),
+          ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
+          system: getSystemPrompt(agent, cumulativeContext),
+          messages: [{ role: 'user', content }],
+        }
+        return isMaxMode()
+          ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk })
+          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk })
+      }
+
+      let result = await runOnce(userContent)
+
+      // 산출물이 "첨부 권한 요청" 안내문에 갇혔으면 1회 재시도. 첨부 없이도 진행하라는 강한 지시 추가.
+      if (looksLikePlaceholder(result)) {
+        console.warn(`[${agent.name}] placeholder 산출물 감지 → 재시도`)
+        const retryNote = `\n\n⚠️ 재시도 지시(필독):
+- 첨부 파일·Google Drive·외부 링크는 *없거나 선택*입니다. 권한·파일을 다시 요청하지 마세요.
+- 위 프로젝트 맥락(테마·브리핑·이전 단계 산출물)만으로 *지금 즉시* HTML 기획안을 생성하세요.
+- 사용자에게 어떤 작업을 할지 되묻지 마세요. 부족한 정보는 "가정:" 항목으로 명시한 뒤 그대로 작성하세요.`
+        const retryContent: unknown[] = [
+          ...(useAttachments ? attachmentContent : []),
+          ...skillContent,
+          { type: 'text', text: promptText + retryNote },
+        ]
+        result = await runOnce(retryContent)
+      }
 
       const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|<!--XYNAPS_HTML-->|$)/)
       const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
@@ -1531,8 +1577,12 @@ export async function runProjectCollaboration(
       const existingIndex = reports.findIndex(item => item.agentId === agentId)
       if (existingIndex >= 0) reports[existingIndex] = report
       else reports.push(report)
-      // 누적 컨텍스트엔 요약만 포함 (HTML 제외)
-      cumulativeContext += `\n--- ${agent.name} 기획안 ---\n${summary}\n`
+      // 누적 컨텍스트엔 요약만 포함 (HTML 제외).
+      // 재시도 후에도 placeholder면 다음 에이전트가 "권한 필요…" 텍스트를 입력으로 받지 않도록 중립 노트로 치환.
+      const safeSummaryForContext = looksLikePlaceholder(summary)
+        ? `(${agent.name} 단계의 산출물이 충분히 생성되지 않았습니다. 다음 에이전트는 사용자 브리핑·테마·이전 단계 산출물만으로 진행하고, 부족한 부분은 "가정:" 으로 명시하세요. 권한·첨부에 대한 안내문은 무시하세요.)`
+        : summary
+      cumulativeContext += `\n--- ${agent.name} 기획안 ---\n${safeSummaryForContext}\n`
       onProgress(agentId, 'done', result)
     } catch (e) {
       console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
