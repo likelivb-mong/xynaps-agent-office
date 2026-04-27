@@ -1164,6 +1164,84 @@ ${isFirstMessage
   }
 }
 
+export async function briefGroupAgents(
+  agentIds: AgentId[],
+  chatHistory: ChatMessage[],
+  projectContext: string,
+): Promise<{ agentId: AgentId; text: string }[]> {
+  const isFirstMessage = chatHistory.length === 0
+  const results = await Promise.all(agentIds.map(async agentId => {
+    const agentDef = AGENTS.find(a => a.id === agentId)!
+    const systemPrompt = `당신은 ${agentDef.emoji} ${agentDef.name}입니다. 역할: ${agentDef.role}
+
+지금은 팀 단체 브리핑 채팅방에서 사용자와 대화 중입니다.
+${isFirstMessage
+  ? `보고서 작성 전 당신의 역할에서 꼭 파악해야 할 핵심 질문을 1-2가지만 간결하게 물어보세요. 다른 에이전트들도 각자 질문하므로 너무 길게 쓰지 마세요.`
+  : `사용자의 최근 답변을 바탕으로, 당신의 역할 관점에서 필요한 경우 한 가지 추가 질문을 하거나 간단히 공감하며 확인하세요. 이미 충분히 파악됐다면 "이해했습니다" 처럼 짧게 마무리해도 됩니다.`
+}
+
+현재 프로젝트 맥락: ${projectContext}
+
+50-150자 이내로 간결하게, 대화체로 응답하세요. HTML 없이 작성하세요.`
+
+    const messages = chatHistory.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }))
+    if (isFirstMessage) messages.push({ role: 'user', content: '안녕하세요, 브리핑을 시작해주세요.' })
+
+    try {
+      const response = await fetch(resolveEndpoint(), {
+        method: 'POST',
+        headers: resolveApiHeaders(),
+        body: JSON.stringify({
+          model: MODEL_FAST,
+          max_tokens: 400,
+          system: systemPrompt,
+          messages,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error?.message || '오류')
+      return { agentId, text: extractText(data).trim() }
+    } catch {
+      return { agentId, text: '' }
+    }
+  }))
+  return results.filter(r => r.text)
+}
+
+export async function generateMeetingMinutes(
+  messages: ChatMessage[],
+  projectContext: string,
+  agentIds: AgentId[],
+): Promise<string> {
+  await assertApiReadyAsync()
+  const agentNames = agentIds.map(id => {
+    const a = AGENTS.find(ag => ag.id === id)
+    return a ? `${a.emoji} ${a.name}` : id
+  }).join(', ')
+  const conversation = messages.map(m => {
+    if (m.role === 'user') return `[사용자] ${m.content}`
+    const a = AGENTS.find(ag => ag.id === m.agentId)
+    const label = a ? `${a.emoji} ${a.name}` : '에이전트'
+    return `[${label}] ${m.content}`
+  }).join('\n')
+
+  const response = await fetchAnthropicWithTimeout({
+    model: MODEL_FAST,
+    max_tokens: 1000,
+    system: '당신은 기획 회의록 작성 전문가입니다. 브리핑 대화를 바탕으로 핵심 논의 내용을 구조적으로 정리합니다.',
+    messages: [{
+      role: 'user',
+      content: `${projectContext}\n\n참여 에이전트: ${agentNames}\n\n브리핑 대화:\n${conversation}\n\n위 대화를 회의록으로 정리해주세요.\n- 사용자가 전달한 주요 정보와 결정사항 중심\n- 에이전트별 확인 사항\n- 마크다운 없이 간결하게 (300자 이내)\n- 회의록 텍스트만 출력`,
+    }],
+  }, { timeoutMs: 30000 })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message || '회의록 생성 실패')
+  return extractText(data).trim()
+}
+
 export async function regenerateAgentDetail(
   agentId: AgentId,
   chatHistory: ChatMessage[],

@@ -1,4 +1,4 @@
-import type { Project, ProjectVersion, AgentReport, FinalReport, SkillFile, AgentId, BranchCode, CrimeConfig, GameFlowSheet, GameSystemType, ChatMessage, CollaborationStatus, WorkshopSession } from '../types'
+import type { Project, ProjectVersion, AgentReport, FinalReport, SkillFile, AgentId, BranchCode, CrimeConfig, GameFlowSheet, GameSystemType, ChatMessage, CollaborationStatus, WorkshopSession, MeetingMinutes } from '../types'
 import { supabase } from './supabase'
 
 const PROJECTS_KEY = 'xynaps_v2_projects'
@@ -477,6 +477,41 @@ export function updateProjectBriefing(
       : project.briefings[agentId]?.completedAt,
   }
   project.updatedAt = new Date().toISOString()
+  saveProject(project)
+}
+
+export function saveGroupBriefing(
+  projectId: string,
+  agentIds: AgentId[],
+  messages: ChatMessage[],
+): void {
+  const projects = getProjects()
+  const project = projects.find(p => p.id === projectId)
+  if (!project) return
+  if (!project.briefings) project.briefings = {}
+  const briefingData = { messages, completedAt: undefined as string | undefined }
+  agentIds.forEach(id => { project.briefings![id] = briefingData })
+  project.updatedAt = new Date().toISOString()
+  saveProject(project)
+}
+
+export function completeGroupBriefing(
+  projectId: string,
+  agentIds: AgentId[],
+  messages: ChatMessage[],
+  minutes: MeetingMinutes,
+): void {
+  const projects = getProjects()
+  const project = projects.find(p => p.id === projectId)
+  if (!project) return
+  if (!project.briefings) project.briefings = {}
+  const completedAt = new Date().toISOString()
+  agentIds.forEach(id => {
+    project.briefings![id] = { messages, completedAt }
+  })
+  if (!project.meetingMinutes) project.meetingMinutes = []
+  project.meetingMinutes.push(minutes)
+  project.updatedAt = completedAt
   saveProject(project)
 }
 

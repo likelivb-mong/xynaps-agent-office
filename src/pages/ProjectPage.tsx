@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
 import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion } from '../lib/storage'
-import { AgentBriefingCard } from '../components/briefing/AgentBriefingCard'
+import { GroupBriefingChat } from '../components/briefing/GroupBriefingChat'
 import { compileGameFlow, compileAudioScript } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, rerunSingleAgent, isSingleAgentRunning, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
@@ -15,6 +15,60 @@ import { WorkshopTab } from '../components/workshop/WorkshopTab'
 import { AGENTS } from '../data/agents'
 import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, AudioScript, ChatMessage, DetailVersion } from '../types'
 
+// ─── 회의록 카드 ─────────────────────────────────────────────────────────────
+function MinutesCard({ minutes }: { minutes: import('../types').MeetingMinutes }) {
+  const [open, setOpen] = useState(false)
+  const agentMap = new Map(AGENTS.map(a => [a.id, a]))
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer', background: 'var(--bg-secondary)' }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent)', background: 'var(--accent-dim)', borderRadius: 6, padding: '2px 8px' }}>
+          {minutes.order}차 회의록
+        </div>
+        <div style={{ flex: 1, fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {minutes.summary.split('\n')[0]}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>
+          {new Date(minutes.createdAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </div>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+            {minutes.summary}
+          </div>
+          <details style={{ marginTop: 4 }}>
+            <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+              대화 내용 보기 ({minutes.messages.length}개 메시지)
+            </summary>
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+              {minutes.messages.map(msg => {
+                const agentDef = msg.agentId ? agentMap.get(msg.agentId as import('../types').AgentId) : null
+                return (
+                  <div key={msg.id} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: 6 }}>
+                    <div style={{
+                      maxWidth: '80%', fontSize: 11, lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                      background: msg.role === 'user' ? 'var(--accent-dim)' : 'var(--bg-secondary)',
+                      border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px',
+                      color: msg.role === 'user' ? 'var(--accent)' : 'var(--text-secondary)',
+                    }}>
+                      {agentDef && <div style={{ fontSize: 9, fontWeight: 700, color: agentDef.color, marginBottom: 2 }}>{agentDef.emoji} {agentDef.name}</div>}
+                      {msg.content}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </details>
+        </div>
+      )}
+    </div>
+  )
+}
 // ─── 브리핑 섹션 ────────────────────────────────────────────────────────────
 function BriefingSection({
   project, activeAgentIds, onUpdate,
@@ -25,7 +79,8 @@ function BriefingSection({
       ? `\n장르: ${project.crimeConfig.genres?.join(', ')}\n장소: ${project.crimeConfig.location}`
       : ''
   }`
-  const briefedCount = Object.values(project.briefings ?? {}).filter(b => b?.completedAt).length
+  const isCompleted = Boolean(Object.values(project.briefings ?? {}).find(b => b?.completedAt))
+  const firstAgentBriefing = project.briefings?.[activeAgentIds[0]]
 
   return (
     <div style={{
@@ -36,31 +91,27 @@ function BriefingSection({
         <div>
           <div style={{ fontWeight: 700, fontSize: 14 }}>에이전트 사전 브리핑</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-            선택 사항 · 보고서 생성 전에 각 에이전트와 프로젝트를 논의하세요
+            선택 사항 · 보고서 생성 전에 팀 전체와 프로젝트를 논의하세요
           </div>
         </div>
-        {briefedCount > 0 && (
+        {isCompleted && (
           <span style={{
             fontSize: 11, fontWeight: 700, color: '#3fb950',
             background: '#3fb95022', border: '1px solid #3fb95044',
             borderRadius: 10, padding: '3px 10px',
           }}>
-            {briefedCount}/{briefingAgents.length} 완료
+            브리핑 완료
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {briefingAgents.map(agent => (
-          <AgentBriefingCard
-            key={agent.id}
-            agent={agent}
-            briefing={project.briefings?.[agent.id]}
-            projectContext={projectContext}
-            projectId={project.id}
-            onUpdate={onUpdate}
-          />
-        ))}
-      </div>
+      <GroupBriefingChat
+        agents={briefingAgents}
+        projectContext={projectContext}
+        projectId={project.id}
+        initialMessages={firstAgentBriefing?.messages ?? []}
+        initialCompleted={isCompleted}
+        onUpdate={onUpdate}
+      />
     </div>
   )
 }
@@ -1235,6 +1286,17 @@ export function ProjectPage() {
                 </div>
               )
             })()}
+            {/* 회의록 목록 */}
+            {(project.meetingMinutes?.length ?? 0) > 0 && (
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 20, marginBottom: 20 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>브리핑 회의록</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[...(project.meetingMinutes ?? [])].sort((a, b) => b.order - a.order).map(m => (
+                    <MinutesCard key={m.id} minutes={m} />
+                  ))}
+                </div>
+              </div>
+            )}
             {/* 사전 브리핑 섹션 — 드래프트 */}
             {!isReadonlyDraftView && (
               <>
@@ -1246,14 +1308,14 @@ export function ProjectPage() {
                     에이전트들이 사건 설정을 바탕으로 기획안을 작성합니다
                   </div>
                   {(() => {
-                    const briefedCount = Object.values(project.briefings ?? {}).filter(b => b?.completedAt).length
+                    const hasBriefing = Boolean(Object.values(project.briefings ?? {}).find(b => b?.completedAt))
                     return (
                       <button onClick={startCollaboration} style={{
                         padding: '10px 28px', borderRadius: 10, border: 'none',
                         background: 'var(--accent)', color: 'var(--accent-fg)',
                         fontSize: 13, fontWeight: 700, cursor: 'pointer',
                       }}>
-                        {briefedCount > 0 ? `협업 시작 (브리핑 ${briefedCount}개 반영)` : '협업 시작하기'}
+                        {hasBriefing ? '협업 시작 (브리핑 반영)' : '협업 시작하기'}
                       </button>
                     )
                   })()}

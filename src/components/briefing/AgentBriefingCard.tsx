@@ -230,12 +230,29 @@ export function AgentBriefingCard({ agent, briefing, projectContext, projectId, 
             )}
             {loading && messages.length > 0 && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <style>{`
+                  @keyframes briefing-dot-bounce {
+                    0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+                    30% { transform: translateY(-5px); opacity: 1; }
+                  }
+                  .briefing-typing-dot {
+                    width: 6px; height: 6px; border-radius: 50%;
+                    background: var(--text-muted);
+                    animation: briefing-dot-bounce 1.2s ease-in-out infinite;
+                    display: inline-block;
+                  }
+                  .briefing-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+                  .briefing-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+                `}</style>
                 <div style={{
                   background: 'var(--bg-secondary)', border: '1px solid var(--border)',
                   borderRadius: '12px 12px 12px 2px',
-                  padding: '8px 14px', fontSize: 12, color: 'var(--text-muted)',
+                  padding: '10px 14px',
+                  display: 'flex', alignItems: 'center', gap: 4,
                 }}>
-                  ···
+                  <span className="briefing-typing-dot" />
+                  <span className="briefing-typing-dot" />
+                  <span className="briefing-typing-dot" />
                 </div>
               </div>
             )}
