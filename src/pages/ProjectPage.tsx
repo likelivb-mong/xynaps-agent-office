@@ -1757,13 +1757,22 @@ export function ProjectPage() {
                         color: btn.active ? 'var(--text-primary)' : 'var(--text-muted)', cursor: 'pointer',
                       }}>{btn.icon}</button>
                     ))}
+                    <button onClick={handleRerunFinalOnly} title="최종 보고서만 재실행" style={{
+                      width: 28, height: 28, padding: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 8,
+                      border: '1px solid rgba(99,179,237,0.34)',
+                      background: 'rgba(99,179,237,0.1)', color: '#90cdf4', cursor: 'pointer',
+                    }}>
+                      <RefreshIcon width={13} height={13} />
+                    </button>
                     <button onClick={handleRerunAll} title="전체 재실행" style={{
                       width: 28, height: 28, padding: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       borderRadius: 8, border: '1px solid var(--accent)44',
                       background: 'var(--accent-dim)', color: 'var(--accent-text)', cursor: 'pointer',
                     }}>
-                      <DownloadIcon width={13} height={13} />
+                      <RefreshIcon width={13} height={13} />
                     </button>
                   </div>
                 </div>

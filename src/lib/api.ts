@@ -571,6 +571,10 @@ function toReadableApiError(error: unknown, fallback: string): Error {
   return new Error(fallback)
 }
 
+// 스트리밍이 N초 동안 청크를 받지 못하면 stall 로 간주하고 자동 중단.
+// 모델/네트워크가 응답을 끝까지 보내지 못한 채 hang 되는 경우(이전 GD 13분 hang 사례)를 잡는다.
+const STREAM_IDLE_TIMEOUT_MS = 90_000
+
 async function streamMaxModeRequest(
   body: Record<string, unknown>,
   options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void }
@@ -579,7 +583,18 @@ async function streamMaxModeRequest(
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
   options?.signal?.addEventListener('abort', abortForward)
 
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let stalled = false
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => {
+      stalled = true
+      controller.abort(new DOMException('idle timeout', 'AbortError'))
+    }, STREAM_IDLE_TIMEOUT_MS)
+  }
+
   try {
+    resetIdleTimer()
     const response = await fetch(resolveEndpoint(), {
       method: 'POST',
       headers: resolveApiHeaders(),
@@ -597,28 +612,37 @@ async function streamMaxModeRequest(
     let text = ''
     let buf = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
-        if (!raw || raw === '[DONE]') continue
-        let evt: { type: string; text?: string; message?: string }
-        try { evt = JSON.parse(raw) } catch { continue }
-        if (evt.type === 'delta' && evt.text) {
-          text += evt.text
-          options?.onChunk?.(text)
-        } else if (evt.type === 'error') {
-          throw new Error(evt.message || 'CLI 오류')
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        resetIdleTimer()
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (!raw || raw === '[DONE]') continue
+          let evt: { type: string; text?: string; message?: string }
+          try { evt = JSON.parse(raw) } catch { continue }
+          if (evt.type === 'delta' && evt.text) {
+            text += evt.text
+            options?.onChunk?.(text)
+          } else if (evt.type === 'error') {
+            throw new Error(evt.message || 'CLI 오류')
+          }
         }
       }
+    } catch (e) {
+      if (stalled) {
+        throw new Error(`AI 응답이 ${STREAM_IDLE_TIMEOUT_MS / 1000}초간 멈춰 자동 중단되었습니다. 다시 시도해주세요.`)
+      }
+      throw e
     }
     return text
   } finally {
+    if (idleTimer) clearTimeout(idleTimer)
     options?.signal?.removeEventListener('abort', abortForward)
   }
 }
@@ -631,7 +655,18 @@ async function streamAnthropicRequest(
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
   options?.signal?.addEventListener('abort', abortForward)
 
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let stalled = false
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => {
+      stalled = true
+      controller.abort(new DOMException('idle timeout', 'AbortError'))
+    }, STREAM_IDLE_TIMEOUT_MS)
+  }
+
   try {
+    resetIdleTimer()
     const response = await fetch(resolveEndpoint(), {
       method: 'POST',
       headers: resolveApiHeaders(),
@@ -649,27 +684,36 @@ async function streamAnthropicRequest(
     let text = ''
     let buf = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const raw = line.slice(6).trim()
-        if (!raw || raw === '[DONE]') continue
-        try {
-          const evt = JSON.parse(raw)
-          if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-            text += evt.delta.text
-            options?.onChunk?.(text)
-          }
-        } catch { /* skip malformed */ }
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        resetIdleTimer()
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (!raw || raw === '[DONE]') continue
+          try {
+            const evt = JSON.parse(raw)
+            if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+              text += evt.delta.text
+              options?.onChunk?.(text)
+            }
+          } catch { /* skip malformed */ }
+        }
       }
+    } catch (e) {
+      if (stalled) {
+        throw new Error(`AI 응답이 ${STREAM_IDLE_TIMEOUT_MS / 1000}초간 멈춰 자동 중단되었습니다. 다시 시도해주세요.`)
+      }
+      throw e
     }
     return text
   } finally {
+    if (idleTimer) clearTimeout(idleTimer)
     options?.signal?.removeEventListener('abort', abortForward)
   }
 }
@@ -1590,14 +1634,10 @@ export async function runProjectCollaboration(
       cumulativeContext += `\n--- ${agent.name} 기획안 ---\n${safeSummaryForContext}\n`
       onProgress(agentId, 'done', result)
     } catch (e) {
-      // Abort/중단 신호는 swallow 하지 않고 즉시 다시 던져 파이프라인 전체를 종료한다.
-      // 이 검사를 하지 않으면 streamAnthropicRequest 가 던진 AbortError 가 일반 에러처럼 흡수돼
-      // 해당 에이전트만 "오류 / status:done" 으로 마킹되고 루프가 다음 에이전트로 계속 진행된다.
-      const isAbort =
-        !!options?.signal?.aborted ||
-        (e instanceof DOMException && e.name === 'AbortError') ||
-        (e instanceof Error && /(중단|aborted|abort)/i.test(e.message))
-      if (isAbort) {
+      // 사용자 abort(작업 중지 버튼/타임아웃)는 즉시 다시 던져 파이프라인 전체를 종료한다.
+      // 단, streaming 함수 내부의 idle timeout 같은 *로컬* abort 는 user signal 까지 aborted 가
+      // 아니므로 일반 에러로 처리되어 해당 에이전트만 실패하고 다음 에이전트로 진행한다.
+      if (options?.signal?.aborted) {
         throw e instanceof Error ? e : new DOMException('협업이 중지되었습니다.', 'AbortError')
       }
       console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
