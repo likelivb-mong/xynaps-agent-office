@@ -78,6 +78,13 @@ export interface CollaborationStatus {
   versionId?: string
   versionName?: string
 }
+export interface MeetingMinutes {
+  id: string
+  order: number
+  createdAt: string
+  summary: string
+  messages: ChatMessage[]
+}
 export interface Project {
   id: string
   name: string
@@ -89,6 +96,7 @@ export interface Project {
   crimeConfig?: CrimeConfig
   attachments?: SkillFile[]
   briefings?: Partial<Record<AgentId, BriefingData>>
+  meetingMinutes?: MeetingMinutes[]
   collaborationStatus?: CollaborationStatus
   createdAt: string
   updatedAt: string
