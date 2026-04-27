@@ -1693,7 +1693,7 @@ export function ProjectPage() {
                   queuePosition={runningAgentId === report.agentId ? undefined : (report.status === 'pending' ? index + 1 : undefined)}
                   showRetryFromHere={report.agentId === firstFailedAgentId}
                   onRetryFromHere={() => handleRerunFromAgent(report.agentId)}
-                  onRefresh={!running && !generatingFinal && report.status === 'done' ? () => handleRefreshSingleAgent(report.agentId) : undefined}
+                  onRefresh={!running && !generatingFinal && (report.status === 'done' || report.status === 'pending') ? () => handleRefreshSingleAgent(report.agentId) : undefined}
                   isRefreshing={refreshingAgents.has(report.agentId)}
                   projectContext={`프로젝트: ${project.theme}\n${project.crimeConfig ? `장르: ${project.crimeConfig.genres?.join(', ')} / 장소: ${project.crimeConfig.location}` : ''}`}
                   previousReports={displayReports.filter(r => r.agentId !== report.agentId)}
