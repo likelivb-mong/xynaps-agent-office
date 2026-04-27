@@ -62,6 +62,7 @@ export interface CrimeConfig {
   relations: CharacterRelation[]
   genres: string[]
   storyFlow: StoryStage[]
+  combinationSummary?: string
 }
 export interface BriefingData {
   messages: ChatMessage[]

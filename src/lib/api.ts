@@ -1727,3 +1727,31 @@ HTML 없이 일반 텍스트로만 응답하세요.
 
   return responses.join('\n\n')
 }
+
+// ── 사건 조합 요약 생성 ──────────────────────────────────────────────────────────
+
+export async function generateCombinationSummary(crime: CrimeConfig): Promise<string> {
+  await assertApiReadyAsync()
+  const context = buildCrimeContext(crime)
+  const response = await fetchAnthropicWithTimeout({
+    model: MODEL_FAST,
+    max_tokens: 600,
+    system: '당신은 방탈출/크라임씬 기획 전문가입니다. 사건 설정을 바탕으로 플레이어가 처음 접하는 간결한 사건 요약 문장을 한국어로 작성합니다.',
+    messages: [{
+      role: 'user',
+      content: `${context}
+
+위 사건 설정을 바탕으로, 가해자·피해자·범행동기·범행종류·장소·수사단서·수사기법을 자연스럽게 녹인 2~3문장 분량의 사건 요약 문장을 작성해주세요.
+
+규칙:
+- 등장인물 이름이 있는 경우 그 이름을 정확히 사용하세요.
+- 동기 설명 텍스트에 포함된 인물명은 실제 등장인물과 구별하여 사용하세요.
+- 사건 개요→수사 방향 순서로 서술하세요.
+- 장르적 분위기를 살려 작성하세요.
+- 요약 텍스트만 출력하고 다른 설명은 금지합니다.`,
+    }],
+  }, { timeoutMs: 30000 })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message || '사건 조합 생성 실패')
+  return extractText(data).trim()
+}

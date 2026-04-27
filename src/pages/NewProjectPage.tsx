@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { PaperclipIcon, Spinner, DownloadIcon, WriteIcon } from '../components/ui/Icon'
 import { createProject, createDraftVersion, getProjects, saveProject } from '../lib/storage'
-import { generateDraftCrimeConfigFromFiles, listGoogleDriveFolderMetadata } from '../lib/api'
+import { generateDraftCrimeConfigFromFiles, listGoogleDriveFolderMetadata, generateCombinationSummary } from '../lib/api'
 import { BRANCH_CODES } from '../data/questData'
 import { CRIME_MOTIVES, CRIME_TYPES, CRIME_CLUES, CRIME_METHODS, GENRES, STORY_STAGES } from '../data/crimeData'
 import type { BranchCode, CrimeConfig, SkillFile, Character, CharacterRelation, StoryStage, CharacterRole, RelationType, StoryStageKey, GameSystemType } from '../types'
@@ -1136,6 +1136,8 @@ export function NewProjectPage() {
   })
   const [draggingKeyword, setDraggingKeyword] = useState<CrimeKeywordState | null>(null)
   const [dragOverTarget, setDragOverTarget] = useState<KeywordDropTarget | null>(null)
+  const [combinationSaving, setCombinationSaving] = useState(false)
+  const [previewSummary, setPreviewSummary] = useState<string | null>(editingProject?.crimeConfig?.combinationSummary ?? null)
 
   // 관계 추가 폼 상태
   const [showRelationForm, setShowRelationForm] = useState(false)
@@ -1425,7 +1427,7 @@ export function NewProjectPage() {
     setDraggingKeyword(null)
   }
 
-  function handleStart() {
+  async function handleStart() {
     const normalized = splitThemeBundleFiles(themeBundleFiles)
     const finalFloorPlans = floorPlans.length > 0 ? floorPlans : normalized.floorPlans
     const finalAttachments = attachments.length > 0 ? attachments : normalized.attachments
@@ -1434,6 +1436,17 @@ export function NewProjectPage() {
       genres: normalizeGenres(genres), characters, relations, storyFlow,
     }
     if (editingProject) {
+      setCombinationSaving(true)
+      try {
+        const summary = await generateCombinationSummary(crimeConfig)
+        crimeConfig.combinationSummary = summary
+        setPreviewSummary(summary)
+      } catch {
+        // 실패해도 기존 요약 유지하고 저장 진행
+        crimeConfig.combinationSummary = editingProject.crimeConfig?.combinationSummary
+      } finally {
+        setCombinationSaving(false)
+      }
       const updated = {
         ...editingProject,
         name: name.trim(),
@@ -2930,10 +2943,13 @@ export function NewProjectPage() {
             </div>
 
             {/* 조합 미리보기 */}
-            {buildPreviewSentence() && (
+            {(previewSummary || buildPreviewSentence()) && (
               <div style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)', border: '1px solid var(--accent)', borderRadius: 14, padding: '18px 20px', marginBottom: 12 }}>
                 <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 700, marginBottom: 8 }}>💡 사건 조합 미리보기</div>
-                <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.7 }}>{buildPreviewSentence()}</div>
+                {combinationSaving
+                  ? <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)' }}><Spinner size={13} color="var(--accent)" /> 사건 조합 재생성 중...</div>
+                  : <div style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.7 }}>{previewSummary ?? buildPreviewSentence()}</div>
+                }
               </div>
             )}
 
@@ -3066,8 +3082,12 @@ export function NewProjectPage() {
               {autoFillBusy ? <><Spinner size={12} color="var(--text-muted)" /> 반영 중...</> : step === 0 && (themeBundleFiles.length > 0 || crimePackFiles.length > 0) ? '반영 후 다음 →' : '다음 →'}
             </button>
           ) : (
-            <button onClick={handleStart} style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#111111', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-              {isEditMode ? '💾 편집 저장' : '🚀 프로젝트 시작'}
+            <button
+              onClick={handleStart}
+              disabled={combinationSaving}
+              style={{ padding: '10px 28px', borderRadius: 10, border: 'none', background: combinationSaving ? 'var(--bg-card)' : 'var(--accent)', color: combinationSaving ? 'var(--text-muted)' : '#111111', fontSize: 14, fontWeight: 700, cursor: combinationSaving ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {combinationSaving ? <><Spinner size={12} color="var(--text-muted)" /> 저장 중...</> : isEditMode ? '💾 편집 저장' : '🚀 프로젝트 시작'}
             </button>
           )}
         </div>

@@ -1140,11 +1140,11 @@ export function ProjectPage() {
                   )}
 
                   {/* 조합 미리보기 */}
-                  {hasCombination && (
+                  {(crime.combinationSummary || hasCombination) && (
                     <div style={{ background: 'linear-gradient(135deg, #1b2338 0%, #18263f 100%)', border: '1px solid rgba(180,255,80,0.55)', borderRadius: 16, padding: '18px 20px', marginBottom: 14, boxShadow: '0 10px 26px rgba(0,0,0,0.18)' }}>
                       <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 800, marginBottom: 10 }}>사건 조합</div>
                       <div style={{ fontSize: 14, lineHeight: 1.75, color: 'var(--text-primary)' }}>
-                        {[
+                        {crime.combinationSummary ?? [
                           perpName && `${perpName}가`,
                           crime.motives?.[0] && `'${crime.motives[0]}' 동기로`,
                           vicName && `${vicName}를`,
