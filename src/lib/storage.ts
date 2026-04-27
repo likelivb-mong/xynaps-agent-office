@@ -322,6 +322,24 @@ export function updateProjectCollaborationStatus(
   saveProject(project)
 }
 
+// 앱 부팅 시점에 호출. 협업 러너는 in-memory 상태이므로 페이지 새로고침/탭 닫기로 죽으면
+// 메모리에 남은 컨트롤러가 없는데도 localStorage 의 collaborationStatus.active 가 true 로 박혀
+// 메인 화면에 "협업 진행중" 카드가 stale 하게 남는 문제를 정리한다.
+export function clearStaleCollaborationStatuses(): void {
+  const projects = getProjects()
+  let changed = false
+  for (const project of projects) {
+    if (project.collaborationStatus?.active) {
+      delete project.collaborationStatus
+      project.updatedAt = new Date().toISOString()
+      changed = true
+    }
+  }
+  if (changed) {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
+  }
+}
+
 export function updateVersionGameFlow(
   projectId: string,
   versionId: string,
