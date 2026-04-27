@@ -5,6 +5,8 @@ import type { AgentId, AgentReport, FinalReport, Project, ProjectVersion } from 
 
 // Tracks in-flight single-agent refresh jobs: key = `${projectId}:${agentId}`
 const singleAgentJobs = new Map<string, Promise<void>>()
+// 단일 에이전트 재실행을 사용자가 작업 중지 버튼으로 취소할 수 있도록 controller도 같이 추적.
+const singleAgentControllers = new Map<string, AbortController>()
 
 export interface CollaborationSnapshot {
   projectId: string
@@ -530,10 +532,21 @@ export function rerunFinalReportOnly(projectId: string, versionId: string): { al
 }
 
 export function cancelCollaborationRunner(projectId: string): boolean {
+  let cancelled = false
+  // 전체 협업 controller
   const controller = activeControllers.get(projectId)
-  if (!controller) return false
-  controller.abort()
-  return true
+  if (controller) {
+    controller.abort()
+    cancelled = true
+  }
+  // 진행 중인 모든 단일 에이전트 재실행 controller도 취소
+  for (const [key, ctrl] of singleAgentControllers.entries()) {
+    if (key.startsWith(`${projectId}:`)) {
+      ctrl.abort()
+      cancelled = true
+    }
+  }
+  return cancelled
 }
 
 export function hasFailedReports(reports: AgentReport[]): boolean {
@@ -565,11 +578,16 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
   // Seed reports = all agents that ran before this one (keep their results for context)
   const seedReports = existingReports.filter(r => agentOrder.indexOf(r.agentId) < agentIndex)
 
+  // 단일 에이전트 재실행도 작업 중지 버튼으로 취소할 수 있도록 controller 등록
+  const abortController = new AbortController()
+  singleAgentControllers.set(jobKey, abortController)
+
   // Update snapshot: mark only this agent as running
+  // activeVersionId 도 리셋해 옛 버전(과거 에러·이전 편집)이 화면에 남는 문제 차단
   const current = snapshots.get(projectId)
   const baseReports = existingReports.length
     ? existingReports.map(r =>
-        r.agentId === agentId ? { ...r, status: 'pending' as const, summary: '', detail: '' } : r
+        r.agentId === agentId ? { ...r, status: 'pending' as const, summary: '', detail: '', activeVersionId: undefined } : r
       )
     : agentOrder.map(id => {
         const existing = existingReports.find(r => r.agentId === id)
@@ -653,16 +671,25 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
           startFromAgentId: agentId,
           endAtAgentId: agentId,
           seedReports,
-          timeoutMs: 240000,
+          signal: abortController.signal,
         },
       )
 
-      // Merge the refreshed agent result back into the full report list
+      // Merge the refreshed agent result back into the full report list.
+      // 기존 detailVersions / chatHistory / feedback 은 보존 (재실행으로 사용자 편집·채팅 기록 손실 방지).
+      // activeVersionId 는 새 결과를 보여주기 위해 undefined 로 리셋.
       const refreshedAgent = updatedReports.find(r => r.agentId === agentId)
       if (refreshedAgent) {
-        const mergedReports = existingReports.map(r => r.agentId === agentId ? refreshedAgent : r)
-        // If this agent wasn't in existingReports, append
-        if (!existingReports.find(r => r.agentId === agentId)) mergedReports.push(refreshedAgent)
+        const existing = existingReports.find(r => r.agentId === agentId)
+        const refreshedWithHistory: AgentReport = {
+          ...refreshedAgent,
+          detailVersions: existing?.detailVersions,
+          activeVersionId: undefined,
+          chatHistory: existing?.chatHistory,
+          feedback: existing?.feedback,
+        }
+        const mergedReports = existingReports.map(r => r.agentId === agentId ? refreshedWithHistory : r)
+        if (!existingReports.find(r => r.agentId === agentId)) mergedReports.push(refreshedWithHistory)
         updateVersionReports(projectId, version.id, mergedReports, version.finalReport ?? undefined)
 
         const afterSnap = snapshots.get(projectId)
@@ -670,19 +697,27 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
           setSnapshot(projectId, {
             ...afterSnap,
             runningAgentId: null,
-            reports: afterSnap.reports.map(r => r.agentId === agentId ? refreshedAgent : r),
+            reports: afterSnap.reports.map(r => r.agentId === agentId ? refreshedWithHistory : r),
           })
         }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const agentDef = AGENTS.find(a => a.id === agentId)
+      const isAbort = abortController.signal.aborted || /aborted|중지|중단/i.test(message)
+      // 사용자가 작업 중지를 누른 경우와 일반 에러를 구분.
+      // 기존 detailVersions / chatHistory 는 에러 시에도 보존 — 재실행 실패가 사용자 편집을 날리지 않도록.
+      const existing = existingReports.find(r => r.agentId === agentId)
       const errorReport: AgentReport = {
         agentId,
         agentName: agentDef?.name ?? agentId,
-        summary: '재실행 중 오류가 발생했습니다',
-        detail: message,
+        summary: isAbort ? '재실행이 중지되었습니다' : '재실행 중 오류가 발생했습니다',
+        detail: isAbort ? '사용자 요청으로 재실행이 중지되었습니다. 다시 시도하거나 그대로 두셔도 됩니다.' : message,
         status: 'done',
+        detailVersions: existing?.detailVersions,
+        activeVersionId: undefined,
+        chatHistory: existing?.chatHistory,
+        feedback: existing?.feedback,
       }
       const mergedReports = existingReports.map(r => r.agentId === agentId ? errorReport : r)
       if (!existingReports.find(r => r.agentId === agentId)) mergedReports.push(errorReport)
@@ -693,17 +728,20 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
           ...afterSnap,
           runningAgentId: null,
           reports: afterSnap.reports.map(r => r.agentId === agentId ? errorReport : r),
-          error: message,
+          error: isAbort ? null : message,
         })
       }
       appendLog(projectId, {
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
-        level: 'error',
-        message: `${agentDef?.name ?? agentId} 재실행 실패: ${message}`,
+        level: isAbort ? 'warning' : 'error',
+        message: isAbort
+          ? `${agentDef?.name ?? agentId} 재실행 중지됨`
+          : `${agentDef?.name ?? agentId} 재실행 실패: ${message}`,
       })
     } finally {
       singleAgentJobs.delete(jobKey)
+      singleAgentControllers.delete(jobKey)
     }
   })()
 
