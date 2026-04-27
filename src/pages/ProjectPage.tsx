@@ -1766,14 +1766,6 @@ export function ProjectPage() {
                     }}>
                       <RefreshIcon width={13} height={13} />
                     </button>
-                    <button onClick={handleRerunAll} title="전체 재실행" style={{
-                      width: 28, height: 28, padding: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      borderRadius: 8, border: '1px solid var(--accent)44',
-                      background: 'var(--accent-dim)', color: 'var(--accent-text)', cursor: 'pointer',
-                    }}>
-                      <RefreshIcon width={13} height={13} />
-                    </button>
                   </div>
                 </div>
 

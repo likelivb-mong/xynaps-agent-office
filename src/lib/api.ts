@@ -1057,7 +1057,22 @@ ${QUALITY_DIRECTIVE}
 입력 처리 원칙(필독):
 - 첨부 파일·외부 링크(Google Drive·PDF 등)는 *선택* 참조 자료입니다. 없거나 접근 불가하면 위 프로젝트 맥락(테마·브리핑·이전 에이전트 산출물)만으로 즉시 산출물을 생성하세요.
 - 사용자에게 추가 정보·파일·권한·진행 방향을 *되묻지 마세요*. "공유해주시면", "허용해주시면", "어떤 작업을 진행하실 건가요", "말씀해주시면" 같은 문구로 답을 끝내지 마세요.
-- 정보가 부족한 부분은 합리적 가정을 세우고 본문에 "가정:" 으로 명시한 뒤 그대로 진행하세요. 안내문이나 사과문이 아닌, 실제 산출물(HTML 기획안)을 반드시 생성하세요.`
+- 정보가 부족한 부분은 합리적 가정을 세우고 본문에 "가정:" 으로 명시한 뒤 그대로 진행하세요. 안내문이나 사과문이 아닌, 실제 산출물(HTML 기획안)을 반드시 생성하세요.
+- 출력에 첨부 파일·PDF·권한·접근 여부에 대한 메타 언급(예: "PDF 없이", "파일 접근 권한 없이", "PDF 접근 불가 시 처리" 등)을 *포함하지 마세요*. 산출물에는 어떤 자료를 봤는지/못 봤는지에 대한 설명 없이 결과만 깨끗하게 작성하세요.
+
+역할 분담 — 중복 금지(필독):
+- 위 "현재 프로젝트 맥락"의 *이전 에이전트 기획안*에 이미 작성된 내용(구성 공식·CASE 구조·세계관·인물 동기·사건 타임라인 등)은 *다시 적지 마세요*. 같은 표·다이어그램·헤더를 반복 출력하면 보고서 가치가 훼손됩니다.
+- 자기 담당 영역의 *새로운 산출물*만 작성하세요. 이전 단계 결과는 *전제*로 받아 그 위에 자기 영역만 추가 설계합니다.
+- 다른 에이전트의 영역은 한 줄로 짧게 참조만 하고("SA 정의 기준으로 작성" 등), 동일 정보를 재서술하거나 재구조화하지 마세요.
+- 영역 분담:
+  · 크리에이티브 디렉터(CD): 테마 정체성·콘셉트 방향·장르 전략 (only)
+  · 스토리 아키텍트(SA): 세계관·인물·사건 타임라인·CASE 구조·구성 공식 (only — 이후 에이전트는 이 결과를 *전제*로 사용, 재작성 금지)
+  · 게임 디렉터(GD): 플레이 타임라인·플레이어 행동 흐름·난이도 밸런스·엔딩 조건 (only)
+  · 퍼즐 마스터(PM): 퍼즐 유형·잠금 메커니즘·단서 배치·연쇄 잠금 (only — CASE 구성 공식 재작성 금지)
+  · 스페이스 디자이너(SD): 도면 기반 방별 소품 배치·동선·조명·사운드 연출 (only)
+  · 오퍼레이션 매니저(OM): 브리핑·운영 체크리스트·안전·현장 동선 (only)
+  · 음향술사: 서라운드 오디오 스크립트·포지셔닝·큐 (only)
+  · 엑스파일러: 증거·수사 플로우·용의자 프로파일·검거 조건 (only)`
 }
 
 export async function callAgent(
@@ -1702,15 +1717,18 @@ ${reportsText}
 - background:#1e293b; border:1px solid #334155; border-radius:8px; padding:12px`
 
   const skillContent = filterBinaryForMaxMode(buildFileContent(pdAgent.skills))
-  const response = await fetchAnthropicWithTimeout({
+  // 최종 종합은 8개 에이전트 산출물을 모두 압축해 새 HTML을 생성하므로 토큰량이 크고 시간이 오래 걸린다.
+  // 기존 fetchAnthropicWithTimeout(고정 90초 타임아웃) 사용 시 빈번하게 "응답 시간 초과" 에러가 발생했다.
+  // streaming 으로 전환해 고정 타임아웃 제거 + idle timeout(90초 청크 무수신) 으로만 stall 감지.
+  const reqBody = {
     model: MODEL_FAST,
     max_tokens: 3500,
     system: getSystemPrompt(pdAgent),
     messages: [{ role: 'user', content: [...skillContent, { type: 'text', text: prompt }] }],
-  }, options)
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error?.message || 'API 오류')
-  const result = extractText(data)
+  }
+  const result = isMaxMode()
+    ? await streamMaxModeRequest(reqBody, { signal: options?.signal })
+    : await streamAnthropicRequest(reqBody, { signal: options?.signal })
   const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|$)/)
   const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
 
