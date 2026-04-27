@@ -1496,6 +1496,11 @@ export async function runProjectCollaboration(
   }
 
   for (const agentId of rerunOrder) {
+    // 다음 에이전트 실행 전에 abort 신호 확인. 사용자가 "작업 중지"를 누른 직후 또는
+    // 타임아웃이 발생한 경우 여기서 루프를 즉시 종료한다 (catch 블록에서도 동일 검사).
+    if (options?.signal?.aborted) {
+      throw new DOMException('협업이 중지되었습니다.', 'AbortError')
+    }
     const agentDef = AGENTS.find(a => a.id === agentId)!
     const agent = { ...agentDef, skills: [...(commonSkills ?? []), ...(agentSkills[agentId] || [])].filter(s => s.enabled !== false) }
 
@@ -1585,6 +1590,16 @@ export async function runProjectCollaboration(
       cumulativeContext += `\n--- ${agent.name} 기획안 ---\n${safeSummaryForContext}\n`
       onProgress(agentId, 'done', result)
     } catch (e) {
+      // Abort/중단 신호는 swallow 하지 않고 즉시 다시 던져 파이프라인 전체를 종료한다.
+      // 이 검사를 하지 않으면 streamAnthropicRequest 가 던진 AbortError 가 일반 에러처럼 흡수돼
+      // 해당 에이전트만 "오류 / status:done" 으로 마킹되고 루프가 다음 에이전트로 계속 진행된다.
+      const isAbort =
+        !!options?.signal?.aborted ||
+        (e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && /(중단|aborted|abort)/i.test(e.message))
+      if (isAbort) {
+        throw e instanceof Error ? e : new DOMException('협업이 중지되었습니다.', 'AbortError')
+      }
       console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
       const readableError = toReadableApiError(e, `${agent.name} 협업 생성에 실패했습니다.`)
       const report: AgentReport = {
