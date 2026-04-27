@@ -282,6 +282,15 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
               </span>
             </span>
           )}
+          {!isRunning && !isRefreshing && report.status === 'pending' && onRefresh && (
+            <button
+              onClick={onRefresh}
+              title="이 에이전트부터 재실행"
+              style={iconBtn(false)}
+            >
+              <RefreshIcon width={13} height={13} />
+            </button>
+          )}
           {!isRunning && !isRefreshing && report.status === 'done' && (() => {
             const isFailed = (report.summary ?? '').includes('오류')
             return (
