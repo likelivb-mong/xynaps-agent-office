@@ -571,8 +571,14 @@ function toReadableApiError(error: unknown, fallback: string): Error {
   return new Error(fallback)
 }
 
-// 스트리밍이 N초 동안 청크를 받지 못하면 stall 로 간주하고 자동 중단.
-// 모델/네트워크가 응답을 끝까지 보내지 못한 채 hang 되는 경우(이전 GD 13분 hang 사례)를 잡는다.
+// 스트리밍 stall 감지 — 모델/네트워크가 응답을 끝까지 보내지 못한 채 hang 되는 경우 자동 중단.
+//
+// 두 단계로 분리:
+// (1) FIRST_CHUNK 까지: extended thinking 으로 모델이 첫 토큰 생성 전에 길게 사유 가능.
+//     컨텍스트가 큰 첫 에이전트(CD)는 TTFT 가 90초를 넘기는 경우가 잦아 240초로 넉넉히 줌.
+// (2) FIRST_CHUNK 이후: 한 번 스트리밍이 시작되면 청크 간 gap 은 90초 안에 들어와야 함.
+//     그렇지 않으면 진짜 stall 로 간주.
+const STREAM_INITIAL_TIMEOUT_MS = 240_000
 const STREAM_IDLE_TIMEOUT_MS = 90_000
 
 async function streamMaxModeRequest(
@@ -585,12 +591,14 @@ async function streamMaxModeRequest(
 
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let stalled = false
+  let receivedFirstChunk = false
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer)
+    const ms = receivedFirstChunk ? STREAM_IDLE_TIMEOUT_MS : STREAM_INITIAL_TIMEOUT_MS
     idleTimer = setTimeout(() => {
       stalled = true
       controller.abort(new DOMException('idle timeout', 'AbortError'))
-    }, STREAM_IDLE_TIMEOUT_MS)
+    }, ms)
   }
 
   try {
@@ -616,6 +624,7 @@ async function streamMaxModeRequest(
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        if (!receivedFirstChunk) receivedFirstChunk = true
         resetIdleTimer()
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
@@ -636,7 +645,11 @@ async function streamMaxModeRequest(
       }
     } catch (e) {
       if (stalled) {
-        throw new Error(`AI 응답이 ${STREAM_IDLE_TIMEOUT_MS / 1000}초간 멈춰 자동 중단되었습니다. 다시 시도해주세요.`)
+        const window = receivedFirstChunk ? STREAM_IDLE_TIMEOUT_MS : STREAM_INITIAL_TIMEOUT_MS
+        const reason = receivedFirstChunk
+          ? `AI 응답이 ${window / 1000}초간 멈춰 자동 중단되었습니다.`
+          : `AI 응답이 ${window / 1000}초 안에 시작되지 않아 자동 중단되었습니다.`
+        throw new Error(`${reason} 다시 시도해주세요.`)
       }
       throw e
     }
@@ -657,12 +670,14 @@ async function streamAnthropicRequest(
 
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let stalled = false
+  let receivedFirstChunk = false
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer)
+    const ms = receivedFirstChunk ? STREAM_IDLE_TIMEOUT_MS : STREAM_INITIAL_TIMEOUT_MS
     idleTimer = setTimeout(() => {
       stalled = true
       controller.abort(new DOMException('idle timeout', 'AbortError'))
-    }, STREAM_IDLE_TIMEOUT_MS)
+    }, ms)
   }
 
   try {
@@ -688,6 +703,7 @@ async function streamAnthropicRequest(
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        if (!receivedFirstChunk) receivedFirstChunk = true
         resetIdleTimer()
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
@@ -707,7 +723,11 @@ async function streamAnthropicRequest(
       }
     } catch (e) {
       if (stalled) {
-        throw new Error(`AI 응답이 ${STREAM_IDLE_TIMEOUT_MS / 1000}초간 멈춰 자동 중단되었습니다. 다시 시도해주세요.`)
+        const window = receivedFirstChunk ? STREAM_IDLE_TIMEOUT_MS : STREAM_INITIAL_TIMEOUT_MS
+        const reason = receivedFirstChunk
+          ? `AI 응답이 ${window / 1000}초간 멈춰 자동 중단되었습니다.`
+          : `AI 응답이 ${window / 1000}초 안에 시작되지 않아 자동 중단되었습니다.`
+        throw new Error(`${reason} 다시 시도해주세요.`)
       }
       throw e
     }
