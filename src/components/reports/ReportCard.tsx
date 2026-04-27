@@ -3,7 +3,7 @@ import { Renderer, Marked } from 'marked'
 import type { AgentReport, ChatMessage, DetailVersion } from '../../types'
 import { AGENTS } from '../../data/agents'
 import { AgentChatPanel } from './AgentChatPanel'
-import { ChatIcon, EyeIcon, ListIcon, ChevronLeftIcon, ChevronRightIcon, Spinner, RefreshIcon, PlayIcon } from '../ui/Icon'
+import { ChatIcon, EyeIcon, ChevronLeftIcon, ChevronRightIcon, Spinner, RefreshIcon, PlayIcon } from '../ui/Icon'
 import { AgentIcon } from '../ui/AgentIcon'
 
 interface Props {
@@ -288,10 +288,11 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
               <>
                 {!isFailed && (
                   <>
-                    <button onClick={() => setShowDetail(false)} title="요약 보기" style={iconBtn(!showDetail)}>
-                      <ListIcon width={13} height={13} />
-                    </button>
-                    <button onClick={() => setShowDetail(true)} title="상세 보기" style={iconBtn(showDetail)}>
+                    <button
+                      onClick={() => setShowDetail(v => !v)}
+                      title={showDetail ? '요약만 보기로 전환' : '상세 보기로 전환'}
+                      style={iconBtn(showDetail)}
+                    >
                       <EyeIcon width={13} height={13} />
                     </button>
                     <div style={{ position: 'relative' }}>
