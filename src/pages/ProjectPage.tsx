@@ -80,7 +80,41 @@ function BriefingSection({
       : ''
   }`
   const isCompleted = Boolean(Object.values(project.briefings ?? {}).find(b => b?.completedAt))
-  const firstAgentBriefing = project.briefings?.[activeAgentIds[0]]
+
+  // 기존 1:1 브리핑 → 1차 회의록 마이그레이션 (최초 1회)
+  const [migrating, setMigrating] = useState(false)
+  useEffect(() => {
+    const hasOldBriefings = Object.values(project.briefings ?? {}).some(b => b?.messages?.length)
+    const hasMinutes = (project.meetingMinutes?.length ?? 0) > 0
+    if (!hasOldBriefings || hasMinutes || migrating) return
+
+    setMigrating(true)
+    // 에이전트별 대화를 시간순으로 합쳐 하나의 메시지 목록 생성
+    const allMessages = Object.entries(project.briefings ?? {}).flatMap(([agentId, b]) =>
+      (b?.messages ?? []).map(m => ({ ...m, agentId: m.agentId ?? agentId as AgentId }))
+    ).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+    if (allMessages.length === 0) { setMigrating(false); return }
+
+    import('../lib/api').then(({ generateMeetingMinutes }) =>
+      generateMeetingMinutes(allMessages, projectContext, activeAgentIds as import('../types').AgentId[])
+    ).then(summary => {
+      const minutes: import('../types').MeetingMinutes = {
+        id: crypto.randomUUID(),
+        order: 1,
+        createdAt: new Date().toISOString(),
+        summary,
+        messages: allMessages,
+      }
+      import('../lib/storage').then(({ completeGroupBriefing }) => {
+        completeGroupBriefing(project.id, activeAgentIds as import('../types').AgentId[], [], minutes)
+        onUpdate()
+      })
+    }).catch(() => {
+      // 마이그레이션 실패 시 조용히 무시
+    }).finally(() => setMigrating(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id])
 
   return (
     <div style={{
@@ -94,21 +128,20 @@ function BriefingSection({
             선택 사항 · 보고서 생성 전에 팀 전체와 프로젝트를 논의하세요
           </div>
         </div>
-        {isCompleted && (
-          <span style={{
-            fontSize: 11, fontWeight: 700, color: '#3fb950',
-            background: '#3fb95022', border: '1px solid #3fb95044',
-            borderRadius: 10, padding: '3px 10px',
-          }}>
-            브리핑 완료
-          </span>
-        )}
+        {migrating
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}><Spinner size={11} color="var(--text-muted)" /> 이전 브리핑 회의록 변환 중...</span>
+          : isCompleted && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#3fb950', background: '#3fb95022', border: '1px solid #3fb95044', borderRadius: 10, padding: '3px 10px' }}>
+              브리핑 완료
+            </span>
+          )
+        }
       </div>
       <GroupBriefingChat
         agents={briefingAgents}
         projectContext={projectContext}
         projectId={project.id}
-        initialMessages={firstAgentBriefing?.messages ?? []}
+        initialMessages={[]}
         initialCompleted={isCompleted}
         onUpdate={onUpdate}
       />
