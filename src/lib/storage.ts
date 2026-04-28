@@ -26,13 +26,11 @@ async function sbDeleteProject(projectId: string): Promise<void> {
 // ── Supabase 스킬 동기화 ───────────────────────────────────────────────────────
 
 async function sbUpsertSkill(agentId: string, skill: SkillFile): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { base64, url, ...meta } = skill as SkillFile & { base64?: string; url?: string }
   await supabase.from('agent_skills').upsert({
     id: meta.id,
-    owner_id: user.id,
+    owner_id: null,
     agent_id: agentId,
     name: meta.name,
     type: meta.type,
@@ -92,6 +90,17 @@ export async function syncSkillsFromSupabase(): Promise<void> {
   const localCommonIds = new Set(localCommon.map(s => s.id))
   const newCommon = commonList.filter(s => !localCommonIds.has(s.id))
   localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify([...localCommon, ...newCommon]))
+
+  // 로컬에만 있는 스킬 Supabase에 업로드
+  const remoteSkillIds = new Set(data.map((r: { id: string }) => r.id))
+  for (const [agentId, skillList] of Object.entries(localSkills)) {
+    for (const skill of skillList) {
+      if (!remoteSkillIds.has(skill.id)) sbUpsertSkill(agentId, skill)
+    }
+  }
+  for (const skill of localCommon) {
+    if (!remoteSkillIds.has(skill.id)) sbUpsertSkill('common', skill)
+  }
 }
 
 /** Supabase → localStorage 동기화. 앱 로드 시 호출 */
