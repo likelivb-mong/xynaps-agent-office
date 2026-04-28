@@ -1655,18 +1655,17 @@ export async function runProjectCollaboration(
         { type: 'text', text: promptText }
       ]
 
-      // 퍼즐 마스터는 HTML 시각화(잠금 연쇄·X-KIT/Key/Dev 분류) 생성량이 많아 timeout 빈발.
-      // extended thinking 비활성 + max_tokens 축소 + 타임아웃 연장으로 안정적 완료 보장.
+      // 퍼즐 마스터는 HTML 시각화 생성량 때문에 Opus + thinking 조합으로 timeout 빈발.
+      // Sonnet 4.6 강제 + extended thinking 비활성 + max_tokens 5000 으로 안정적 1-2분 완료 보장.
       const isPuzzleAgent = agentId === 'puzzle'
       const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
-      const agentMaxTokens = isPuzzleAgent
-        ? Math.min(resolveMaxTokens('deep'), 8000)
-        : resolveMaxTokens('deep')
-      const agentTimeoutMs = isPuzzleAgent ? 480_000 : 300_000
+      const agentModel = isPuzzleAgent ? 'claude-sonnet-4-6' : resolveModel('deep')
+      const agentMaxTokens = isPuzzleAgent ? 5000 : resolveMaxTokens('deep')
+      const agentTimeoutMs = isPuzzleAgent ? 240_000 : 300_000
       const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
       const runOnce = async (content: unknown[]) => {
         const reqBody = {
-          model: resolveModel('deep'),
+          model: agentModel,
           max_tokens: agentMaxTokens,
           ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
           system: getSystemPrompt(agent, cumulativeContext),
