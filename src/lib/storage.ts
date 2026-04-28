@@ -111,30 +111,44 @@ export async function syncProjectsFromSupabase(): Promise<void> {
     .order('created_at', { ascending: false })
   if (error || !data) return
 
-  const remoteProjects: Project[] = data.map((row: { data: Project }) => row.data)
+  const allRemote: Project[] = data.map((row: { data: Project }) => row.data)
   const localProjects = getProjects()
+  const localTrash = getTrashedProjects()
 
-  // updatedAt 기준으로 최신 버전 유지
-  const merged = new Map<string, Project>()
-  for (const p of [...localProjects, ...remoteProjects]) {
-    const existing = merged.get(p.id)
-    if (!existing || p.updatedAt > existing.updatedAt) {
-      merged.set(p.id, p)
-    }
+  // 휴지통 / 일반 분리 (deletedAt 필드 유무로 구분)
+  const remoteActive: Project[] = []
+  const remoteTrash: TrashedProject[] = []
+  for (const p of allRemote) {
+    if ((p as TrashedProject).deletedAt) remoteTrash.push(p as TrashedProject)
+    else remoteActive.push(p)
   }
 
-  const sorted = Array.from(merged.values()).sort(
+  // 일반 프로젝트 머지 (updatedAt 기준 최신)
+  const mergedActive = new Map<string, Project>()
+  for (const p of [...localProjects, ...remoteActive]) {
+    const existing = mergedActive.get(p.id)
+    if (!existing || p.updatedAt > existing.updatedAt) mergedActive.set(p.id, p)
+  }
+  const sortedActive = Array.from(mergedActive.values()).sort(
     (a, b) => b.createdAt.localeCompare(a.createdAt)
   )
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(sorted))
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(sortedActive))
 
-  // 로컬에만 있는 프로젝트 Supabase에 업로드
-  const remoteIds = new Set(remoteProjects.map(p => p.id))
-  for (const p of localProjects) {
-    if (!remoteIds.has(p.id)) {
-      sbUpsertProject(p)
-    }
+  // 휴지통 머지 (deletedAt 기준 최신)
+  const mergedTrash = new Map<string, TrashedProject>()
+  for (const p of [...localTrash, ...remoteTrash]) {
+    const existing = mergedTrash.get(p.id)
+    if (!existing || p.deletedAt > existing.deletedAt) mergedTrash.set(p.id, p)
   }
+  const sortedTrash = Array.from(mergedTrash.values()).sort(
+    (a, b) => b.deletedAt.localeCompare(a.deletedAt)
+  )
+  localStorage.setItem(PROJECTS_TRASH_KEY, JSON.stringify(sortedTrash))
+
+  // 로컬에만 있는 항목들 Supabase 업로드 (휴지통 포함)
+  const remoteIds = new Set(allRemote.map(p => p.id))
+  for (const p of localProjects) if (!remoteIds.has(p.id)) sbUpsertProject(p)
+  for (const p of localTrash) if (!remoteIds.has(p.id)) sbUpsertProject(p)
 }
 
 // ── 프로젝트 CRUD ───────────────────────────────────────────────────────────────
@@ -182,10 +196,12 @@ export function moveProjectToTrash(projectId: string): void {
   const nextProjects = projects.filter(p => p.id !== projectId)
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects))
 
+  const trashed: TrashedProject = { ...target, deletedAt: new Date().toISOString() }
   const trash = getTrashedProjects().filter(p => p.id !== projectId)
-  trash.unshift({ ...target, deletedAt: new Date().toISOString() })
+  trash.unshift(trashed)
   saveTrashedProjects(trash)
-  sbDeleteProject(projectId)
+  // 휴지통도 동기화: 영구 삭제 대신 deletedAt 포함해 upsert
+  sbUpsertProject(trashed)
 }
 
 export function restoreProjectFromTrash(projectId: string): void {
@@ -216,6 +232,7 @@ export function restoreProjectFromTrash(projectId: string): void {
 export function permanentlyDeleteProjectFromTrash(projectId: string): void {
   const nextTrash = getTrashedProjects().filter(p => p.id !== projectId)
   saveTrashedProjects(nextTrash)
+  sbDeleteProject(projectId)
 }
 
 export function createProject(
