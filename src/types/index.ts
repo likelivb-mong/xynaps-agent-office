@@ -268,6 +268,7 @@ export interface UserJourneyGraph {
   edges: UserJourneyEdge[]
   viewport: UserJourneyViewport
   theme?: 'dark' | 'light'
+  layoutDirection?: 'horizontal' | 'vertical'
 }
 export interface UserFlowConfig {
   title: string

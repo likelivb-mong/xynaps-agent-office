@@ -390,6 +390,7 @@ function buildBaseGraph(userFlow: UserFlowConfig, sections: SectionLite[], steps
     edges,
     viewport: DEFAULT_VIEWPORT,
     theme: userFlow.theme ?? 'dark',
+    layoutDirection: 'vertical',
   }
 }
 
@@ -404,6 +405,16 @@ function pathForEdge(source: UserJourneyNode, target: UserJourneyNode) {
   const ty = target.y + 26
   const bend = Math.max(60, Math.abs(tx - sx) * 0.28)
   return `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`
+}
+
+function pathForEdgeVertical(source: UserJourneyNode, target: UserJourneyNode) {
+  const NODE_H = 52
+  const sx = source.x + 82
+  const sy = source.y + NODE_H
+  const tx = target.x + 82
+  const ty = target.y
+  const bend = Math.max(40, Math.abs(ty - sy) * 0.35)
+  return `M ${sx} ${sy} C ${sx} ${sy + bend}, ${tx} ${ty - bend}, ${tx} ${ty}`
 }
 
 function midpoint(source: UserJourneyNode, target: UserJourneyNode) {
@@ -557,6 +568,141 @@ function layoutGraphLinear(graph: UserJourneyGraph): UserJourneyGraph {
   }
 }
 
+function layoutGraphVertical(graph: UserJourneyGraph): UserJourneyGraph {
+  if (graph.nodes.length === 0) return graph
+
+  const byId = new Map(graph.nodes.map(n => [n.id, n]))
+  const outgoing = new Map<string, string[]>()
+  const incomingCount = new Map<string, number>()
+
+  graph.nodes.forEach(n => {
+    outgoing.set(n.id, [])
+    incomingCount.set(n.id, 0)
+  })
+
+  graph.edges.forEach(edge => {
+    if (!byId.has(edge.source) || !byId.has(edge.target)) return
+    outgoing.get(edge.source)!.push(edge.target)
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1)
+  })
+
+  const rootIds = graph.nodes
+    .filter(n => (incomingCount.get(n.id) || 0) === 0 || n.id === 'journey-root')
+    .sort((a, b) => (a.id === 'journey-root' ? -1 : b.id === 'journey-root' ? 1 : a.x - b.x))
+    .map(n => n.id)
+
+  const depth = new Map<string, number>()
+  const queue: string[] = [...rootIds]
+  rootIds.forEach(id => depth.set(id, 0))
+
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    const currentDepth = depth.get(current) || 0
+    ;(outgoing.get(current) || []).forEach(childId => {
+      const prev = depth.get(childId)
+      const nextDepth = currentDepth + 1
+      if (prev === undefined || nextDepth < prev) {
+        depth.set(childId, nextDepth)
+        queue.push(childId)
+      }
+    })
+  }
+
+  graph.nodes.forEach(n => {
+    if (!depth.has(n.id)) depth.set(n.id, 0)
+  })
+
+  const visitOrder = new Map<string, number>()
+  let orderIdx = 0
+  const seen = new Set<string>()
+
+  function dfs(nodeId: string) {
+    if (seen.has(nodeId)) return
+    seen.add(nodeId)
+    visitOrder.set(nodeId, orderIdx++)
+    const children = (outgoing.get(nodeId) || []).slice().sort((a, b) => {
+      const na = byId.get(a)
+      const nb = byId.get(b)
+      if (!na || !nb) return 0
+      return na.x - nb.x || na.y - nb.y
+    })
+    children.forEach(dfs)
+  }
+
+  rootIds.forEach(dfs)
+  graph.nodes.forEach(n => {
+    if (!visitOrder.has(n.id)) visitOrder.set(n.id, orderIdx++)
+  })
+
+  const levels = new Map<number, UserJourneyNode[]>()
+  graph.nodes.forEach(node => {
+    const d = depth.get(node.id) || 0
+    if (!levels.has(d)) levels.set(d, [])
+    levels.get(d)!.push(node)
+  })
+
+  const yStart = 80
+  const yGap = 160
+  const xGap = 210
+  const leftPad = 100
+
+  const positioned = graph.nodes.map(n => ({ ...n }))
+  const posById = new Map(positioned.map(n => [n.id, n]))
+
+  Array.from(levels.keys()).sort((a, b) => a - b).forEach(level => {
+    const nodes = levels.get(level)!.slice().sort((a, b) =>
+      (visitOrder.get(a.id) || 0) - (visitOrder.get(b.id) || 0)
+    )
+    const totalW = (nodes.length - 1) * xGap
+    const centeredLeft = Math.max(leftPad, Math.floor((CANVAS_WIDTH - totalW) / 2))
+
+    nodes.forEach((node, i) => {
+      const target = posById.get(node.id)
+      if (!target) return
+      target.y = yStart + level * yGap
+      target.x = clamp(centeredLeft + i * xGap, leftPad, CANVAS_WIDTH - 200)
+    })
+  })
+
+  const parentsByNode = new Map<string, string[]>()
+  graph.edges.forEach(edge => {
+    if (!posById.has(edge.source) || !posById.has(edge.target)) return
+    if (!parentsByNode.has(edge.target)) parentsByNode.set(edge.target, [])
+    parentsByNode.get(edge.target)!.push(edge.source)
+  })
+
+  Array.from(levels.keys()).sort((a, b) => a - b).forEach(level => {
+    if (level === 0) return
+    const levelNodes = (levels.get(level) || [])
+      .map(n => posById.get(n.id))
+      .filter((n): n is UserJourneyNode => Boolean(n))
+      .sort((a, b) => a.x - b.x)
+
+    const placedX: number[] = []
+    levelNodes.forEach(node => {
+      const parents = parentsByNode.get(node.id) || []
+      let desiredX = node.x
+      if (parents.length === 1) {
+        const parent = posById.get(parents[0])
+        const siblings = outgoing.get(parents[0]) || []
+        if (parent && siblings.length <= 1) desiredX = parent.x
+      }
+      let nextX = clamp(desiredX, leftPad, CANVAS_WIDTH - 200)
+      while (placedX.some(x => Math.abs(x - nextX) < xGap * 0.78)) nextX += xGap
+      node.x = clamp(nextX, leftPad, CANVAS_WIDTH - 200)
+      placedX.push(node.x)
+    })
+  })
+
+  return { ...graph, nodes: positioned }
+}
+
+function layoutGraph(graph: UserJourneyGraph): UserJourneyGraph {
+  return (graph.layoutDirection ?? 'vertical') === 'vertical'
+    ? layoutGraphVertical(graph)
+    : layoutGraphLinear(graph)
+}
+
 export function UserJourneyEditor({ userFlow, projectName, sections, steps, onChangeUserFlow }: Props) {
   const initializedRef = useRef(false)
   const boardRef = useRef<HTMLDivElement>(null)
@@ -615,7 +761,7 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
   }, [graph.nodes, graph.viewport.zoom])
 
   function commitGraph(next: UserJourneyGraph, options?: { markTableSynced?: boolean }) {
-    const aligned = layoutGraphLinear(next)
+    const aligned = layoutGraph(next)
     onChangeUserFlow({
       ...userFlow,
       graph: aligned,
@@ -1015,6 +1161,7 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
   }
 
   const theme = (graph.theme ?? userFlow.theme ?? 'dark') === 'light' ? 'light' : 'dark'
+  const layoutDir = (graph.layoutDirection ?? 'vertical') as 'horizontal' | 'vertical'
   const boardBg = theme === 'dark'
     ? 'radial-gradient(circle at 20% 0%, #0f1832 0%, #0b0f1b 55%, #090c15 100%)'
     : 'radial-gradient(circle at 20% 0%, #f9fafb 0%, #eef2f7 55%, #e6ecf4 100%)'
@@ -1047,6 +1194,16 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
           <button onClick={() => setViewport(v => ({ ...v, zoom: clamp(v.zoom - 0.1, 0.4, 2.2) }))} style={toolbarBtn}>-</button>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 52, textAlign: 'center' }}>{Math.round(viewport.zoom * 100)}%</span>
           <button onClick={() => setViewport(v => ({ ...v, zoom: clamp(v.zoom + 0.1, 0.4, 2.2) }))} style={toolbarBtn}>+</button>
+          <button
+            onClick={() => {
+              const nextDir: 'horizontal' | 'vertical' = layoutDir === 'vertical' ? 'horizontal' : 'vertical'
+              patchGraph(prev => ({ ...prev, layoutDirection: nextDir, viewport }))
+            }}
+            style={toolbarBtn}
+            title={layoutDir === 'vertical' ? '가로 정렬로 전환' : '세로 정렬로 전환'}
+          >
+            {layoutDir === 'vertical' ? '↔ 가로' : '↕ 세로'}
+          </button>
           <button
             onClick={() => patchGraph(prev => ({ ...prev, theme: prev.theme === 'light' ? 'dark' : 'light', viewport }))}
             style={toolbarBtn}
@@ -1348,7 +1505,7 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
                 const source = getNode(edge.source)
                 const target = getNode(edge.target)
                 if (!source || !target) return null
-                const path = pathForEdge(source, target)
+                const path = layoutDir === 'vertical' ? pathForEdgeVertical(source, target) : pathForEdge(source, target)
                 const flowHighlighted = highlightedFlowEdgeIds.has(edge.id)
                 const targetRawColor = target.style?.color ?? getNodeDefaultColor(target)
                 const targetColor = theme === 'light' && isWhiteColor(targetRawColor) ? '#0f172a' : targetRawColor
