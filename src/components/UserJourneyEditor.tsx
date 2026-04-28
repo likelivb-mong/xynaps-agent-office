@@ -413,8 +413,9 @@ function pathForEdgeVertical(source: UserJourneyNode, target: UserJourneyNode) {
   const sy = source.y + NODE_H
   const tx = target.x + 82
   const ty = target.y
-  const bend = Math.max(40, Math.abs(ty - sy) * 0.35)
-  return `M ${sx} ${sy} C ${sx} ${sy + bend}, ${tx} ${ty - bend}, ${tx} ${ty}`
+  const mid = sy + (ty - sy) * 0.5
+  // 수직 → 수평 → 수직 꺾임 (엘보우): 곡선 없이 직선만 사용해 선 겹침 최소화
+  return `M ${sx} ${sy} L ${sx} ${mid} L ${tx} ${mid} L ${tx} ${ty}`
 }
 
 function midpoint(source: UserJourneyNode, target: UserJourneyNode) {
@@ -642,7 +643,7 @@ function layoutGraphVertical(graph: UserJourneyGraph): UserJourneyGraph {
   })
 
   const yStart = 80
-  const yGap = 160
+  const yGap = 180
   const xGap = 210
   const leftPad = 100
 
