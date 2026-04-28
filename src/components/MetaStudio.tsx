@@ -4085,7 +4085,9 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
             overflow: 'auto',
             border: 'none',
             borderRadius: 12,
-            background: gridTheme === 'light' ? '#ddd8cf' : '#6c7179',
+            background: gridTheme === 'light' ? '#d4cfc8' : '#727780',
+            backgroundImage: `repeating-linear-gradient(to right, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE * canvasZoom}px), repeating-linear-gradient(to bottom, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE * canvasZoom}px)`,
+            backgroundSize: `${TILE * canvasZoom}px ${TILE * canvasZoom}px`,
             maxHeight: canvasViewH,
             boxSizing: 'border-box',
             boxShadow: '0 0 0 1px var(--border), 0 8px 32px rgba(0,0,0,0.45)',
@@ -4129,7 +4131,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
 
         {/* Dev panel */}
         {mode === 'edit' && tool === 'dev' && (
-          <div style={{ width: stackPanels ? '100%' : 220, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden', boxSizing: 'border-box' }}>
+          <div style={{ order: -1, width: stackPanels ? '100%' : 220, flexShrink: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden', boxSizing: 'border-box' }}>
 
             {/* Header */}
             <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
