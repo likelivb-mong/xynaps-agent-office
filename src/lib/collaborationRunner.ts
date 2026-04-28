@@ -118,7 +118,16 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
   activeControllers.set(project.id, abortController)
   const startedAt = new Date().toISOString()
   const agentOrder = buildActiveAgentIds(project)
-  const previousReports = version.agentReports?.length ? version.agentReports : createInitialReports(project)
+  // 이전 실패한 run 에서 일부 에이전트만 저장된 경우라도 snapshot 의 reports 가 모든
+  // agentOrder 항목을 포함하도록 padding 한다. 그렇지 않으면:
+  //   - onProgress 'done' 의 .map 에서 누락된 에이전트가 매칭되지 않아 결과가 무시됨
+  //   - 외부 catch 가 snapshot.reports 를 storage 에 덮어써 다른 에이전트들이 사라짐
+  const previousReports: AgentReport[] = (() => {
+    const initial = createInitialReports(project)
+    if (!version.agentReports?.length) return initial
+    const existingMap = new Map(version.agentReports.map(report => [report.agentId, report]))
+    return initial.map(report => existingMap.get(report.agentId) ?? report)
+  })()
   const seedReports = mode === 'from-agent'
     ? previousReports.filter(report => agentOrder.indexOf(report.agentId) < agentOrder.indexOf(startAgentId ?? agentOrder[0]))
     : []
@@ -203,7 +212,9 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
 
           const targetAgent = AGENTS.find(agent => agent.id === agentId)
           const parsed = result ? parseReportResult(result, targetAgent?.name ?? agentId) : null
-          const nextReports = current.reports.map(report =>
+          // 방어: snapshot 에 해당 에이전트가 누락된 경우(이전 실패 run 의 잔재 등) append 해 추가.
+          const hasAgentInReports = current.reports.some(r => r.agentId === agentId)
+          const updatedReports = current.reports.map(report =>
             report.agentId === agentId
               ? {
                 ...report,
@@ -213,6 +224,15 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
               }
               : report
           )
+          const nextReports = hasAgentInReports
+            ? updatedReports
+            : [...updatedReports, {
+                agentId,
+                agentName: targetAgent?.name ?? agentId,
+                summary: parsed?.summary ?? '',
+                detail: parsed?.detail ?? '',
+                status: 'done' as const,
+              }]
           completedAgentIds = completedAgentIds.includes(agentId) ? completedAgentIds : [...completedAgentIds, agentId]
           setSnapshot(project.id, {
             ...current,
