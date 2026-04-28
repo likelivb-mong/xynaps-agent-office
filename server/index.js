@@ -30,6 +30,17 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, version: '1.0', mode: 'max-subscription' })
 })
 
+// 클라이언트가 보낸 Anthropic 모델 ID 를 Claude CLI 의 --model alias 로 매핑.
+// 알 수 없는 ID 는 null → CLI 기본 모델 사용.
+function resolveCliModel(modelId) {
+  if (typeof modelId !== 'string') return null
+  const id = modelId.toLowerCase()
+  if (id.includes('haiku')) return 'haiku'
+  if (id.includes('sonnet')) return 'sonnet'
+  if (id.includes('opus')) return 'opus'
+  return null
+}
+
 // ── Main proxy ──────────────────────────────────────────────────────────────
 app.post('/api/messages', async (req, res) => {
   const body = req.body
@@ -69,21 +80,27 @@ app.post('/api/messages', async (req, res) => {
     ? `<system>\n${systemPrompt}\n</system>\n\n${userText}`
     : userText
 
+  // 클라이언트가 지정한 모델 (e.g. 'claude-haiku-4-5-20251001') 을 CLI alias 로 변환.
+  // 이전에는 항상 Claude CLI 기본 모델(보통 Sonnet/Opus)을 사용해서 puzzle 처럼
+  // Haiku 가 적합한 케이스에서도 5~10분 걸리던 문제를 해결.
+  const cliModel = resolveCliModel(body.model)
   const wantStream = body.stream === true
   if (wantStream) {
-    callClaudeCliStream(fullPrompt, res)
+    callClaudeCliStream(fullPrompt, res, cliModel)
   } else {
-    callClaudeCli(fullPrompt, res)
+    callClaudeCli(fullPrompt, res, cliModel)
   }
 })
 
 // ── claude CLI subprocess (non-streaming) ───────────────────────────────────
-function callClaudeCli(prompt, res) {
+function callClaudeCli(prompt, res, cliModel) {
   const chunks = []
   const errChunks = []
   let settled = false
 
-  const proc = spawn('claude', ['-p', '--output-format', 'text'], {
+  const args = ['-p', '--output-format', 'text']
+  if (cliModel) args.push('--model', cliModel)
+  const proc = spawn('claude', args, {
     env: process.env,
     maxBuffer: 20 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -137,7 +154,7 @@ function callClaudeCli(prompt, res) {
 }
 
 // ── claude CLI subprocess (SSE streaming) ───────────────────────────────────
-function callClaudeCliStream(prompt, res) {
+function callClaudeCliStream(prompt, res, cliModel) {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -145,7 +162,9 @@ function callClaudeCliStream(prompt, res) {
   const errChunks = []
   let settled = false
 
-  const proc = spawn('claude', ['-p', '--output-format', 'text'], {
+  const args = ['-p', '--output-format', 'text']
+  if (cliModel) args.push('--model', cliModel)
+  const proc = spawn('claude', args, {
     env: process.env,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
