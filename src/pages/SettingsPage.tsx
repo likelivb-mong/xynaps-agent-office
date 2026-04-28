@@ -34,12 +34,12 @@ const TABLE_ROWS = [
 export function SettingsPage() {
   const { settings, updateSettings } = useSettings()
   const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('disconnected')
-  const [urlInput, setUrlInput] = useState(settings.localServerUrl || 'http://localhost:3001')
+  const [urlInput, setUrlInput] = useState(settings.localServerUrl || 'https://localhost:3001')
 
   useEffect(() => { checkLocalServer() }, [])
 
   async function checkLocalServer() {
-    const url = settings.localServerUrl || 'http://localhost:3001'
+    const url = settings.localServerUrl || 'https://localhost:3001'
     setServerStatus('checking')
     try {
       const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(3000) })
@@ -212,7 +212,7 @@ export function SettingsPage() {
               value={urlInput}
               onChange={e => setUrlInput(e.target.value)}
               onBlur={saveUrl}
-              placeholder="http://localhost:3001"
+              placeholder="https://localhost:3001"
               style={{
                 flex: 1, padding: '7px 10px', borderRadius: 7,
                 border: '1px solid #2f3447', background: '#0f1117',

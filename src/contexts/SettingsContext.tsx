@@ -9,7 +9,10 @@ export interface AppSettings {
 }
 
 export const SETTINGS_KEY = 'xynaps_v2_settings'
-export const DEFAULT_SETTINGS: AppSettings = { modelQuality: '균형', useMax: false, localServerUrl: 'http://localhost:3001' }
+// 로컬 서버는 self-signed cert 로 HTTPS 만 listen 하므로 http:// 로 호출하면 즉시 실패.
+// 또한 Chrome 의 Private Network Access(PNA) 정책상 공개 오리진 → loopback 접근에는
+// 추가 preflight 가 필요하며, http→loopback 은 거의 항상 차단됨.
+export const DEFAULT_SETTINGS: AppSettings = { modelQuality: '균형', useMax: false, localServerUrl: 'https://localhost:3001' }
 
 export function loadSettings(): AppSettings {
   try {
@@ -21,6 +24,11 @@ export function loadSettings(): AppSettings {
       const tier = parsed.modelTier
       parsed.modelQuality = tier === 'Max구독연결' ? '최고' : (tier ?? '균형')
       parsed.useMax = tier === 'Max구독연결'
+    }
+    // legacy 'http://localhost:3001' 사용자는 자동 https:// 로 마이그레이션.
+    // 직접 입력한 ngrok 등 외부 URL 은 그대로 둠.
+    if (parsed.localServerUrl === 'http://localhost:3001') {
+      parsed.localServerUrl = 'https://localhost:3001'
     }
     return { ...DEFAULT_SETTINGS, ...parsed }
   } catch { return DEFAULT_SETTINGS }
