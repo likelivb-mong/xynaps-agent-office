@@ -2490,7 +2490,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   const [firedRules, setFiredRules] = useState<Set<string>>(new Set())
   const [buildingRule, setBuildingRule] = useState<BuildingRule | null>(null)
   const [canvasViewW, setCanvasViewW] = useState<number | null>(null)
-  const [canvasViewH, setCanvasViewH] = useState(580)
+  const [canvasViewH, setCanvasViewH] = useState(H + 40)
   const [canvasZoom, setCanvasZoom] = useState(1)
   const [gridTheme, setGridTheme] = useState<'dark' | 'light'>('light')
   const [flowSketchSections, setFlowSketchSections] = useState<FlowSketchSection[]>([])
@@ -3671,13 +3671,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   }
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', gap: 8,
-      background: gridTheme === 'light' ? '#d4cfc8' : '#727780',
-      backgroundImage: `repeating-linear-gradient(to right, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE}px), repeating-linear-gradient(to bottom, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE}px)`,
-      backgroundSize: `${TILE}px ${TILE}px`,
-      borderRadius: 12, padding: 8,
-    }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
 
       {/* ── Toolbar ── */}
       {mode === 'edit' ? (
