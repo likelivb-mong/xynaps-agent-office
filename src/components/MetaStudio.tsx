@@ -2489,7 +2489,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   const [devRules, setDevRules] = useState<DevRule[]>([])
   const [firedRules, setFiredRules] = useState<Set<string>>(new Set())
   const [buildingRule, setBuildingRule] = useState<BuildingRule | null>(null)
-  const [canvasViewW, setCanvasViewW] = useState<number | null>(null)
+  // canvasViewW removed — canvas container always matches W * canvasZoom
   const [canvasViewH, setCanvasViewH] = useState(H + 40)
   const [canvasZoom, setCanvasZoom] = useState(1)
   const [gridTheme, setGridTheme] = useState<'dark' | 'light'>('light')
@@ -2689,11 +2689,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   useEffect(() => {
     function onMove(e: MouseEvent) {
       if (!resizingRef.current) return
-      const dx = e.clientX - resizeStartRef.current.x
       const dy = e.clientY - resizeStartRef.current.y
-      const newW = Math.max(240, resizeStartRef.current.w + dx)
-      // Below 760px threshold: reset to flex:1 (canvas fills available space, palette stays to the right)
-      setCanvasViewW(newW > 760 ? newW : null)
       setCanvasViewH(Math.max(160, resizeStartRef.current.h + dy))
     }
     function onUp() {
@@ -3505,10 +3501,9 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     setCanvasZoom(Math.round(next * 10) / 10)
   }
   // When canvas viewport is wide enough that side panels get cramped → move panel below canvas
-  const panelBelow = canvasViewW !== null && canvasViewW > 760
   const bottomPanelTool = tool === 'place' || tool === 'dev'
-  const stackPanels = panelBelow || bottomPanelTool
-  const widePalette = panelBelow || tool === 'place'
+  const stackPanels = bottomPanelTool
+  const widePalette = tool === 'place'
 
   // ── Dev panel helpers ───────────────────────────────────────────
   const getTypeColor = (dev: DevItem) =>
@@ -4078,7 +4073,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
           style={{
             position: 'relative',
             flex: 'none',
-            width: canvasViewW ?? (stackPanels ? '100%' : W * canvasZoom),
+            width: W * canvasZoom,
             overflow: 'auto',
             border: 'none',
             borderRadius: 12,
