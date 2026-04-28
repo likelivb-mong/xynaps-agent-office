@@ -722,7 +722,9 @@ async function streamAnthropicRequest(
   const headers = options?.viaProxy ? { 'Content-Type': 'application/json' } : resolveApiHeaders()
   const bodyJson = JSON.stringify({ ...body, stream: true })
   // 진단용 메타데이터 — 실패 시 catch 블록이 detail 트레일에 부착해 사용자에게 노출.
-  const reqMeta = { endpoint, viaProxy: !!options?.viaProxy, bodyKB: Math.round(bodyJson.length / 1024) }
+  // build='v4' 마커: 사용자가 이 줄을 트레일에서 보면 최신 번들 사용 중임을 확정.
+  const reqMeta = { endpoint, viaProxy: !!options?.viaProxy, bodyKB: Math.round(bodyJson.length / 1024), build: 'v4' }
+  console.info('[xynaps] streamRequest', reqMeta)
   const tagError = (err: unknown): unknown => {
     if (err instanceof Error) (err as Error & { __reqMeta?: typeof reqMeta }).__reqMeta = reqMeta
     return err
@@ -1673,9 +1675,12 @@ export async function runProjectCollaboration(
       // Vercel Edge body limit (~4.5MB) 또는 브라우저 fetch 한계를 넘어서 발생하는
       // TypeError(Failed to fetch) 우회.
       const isPuzzleAgent = agentId === 'puzzle'
+      // 퍼즐은 본문 최소화가 모든 실패 모드(body limit·prefill 지연·timeout) 공통 처방.
+      // 시스템 프롬프트(역할·금지규칙·스킬 사용 안내)와 cumulativeContext(이전 단계 산출물
+      // 요약)만으로도 퍼즐 설계에 충분 — 스킬 첨부 텍스트는 통째로 생략.
       const rawSkillBlocks = buildFileContent(agent.skills)
       const skillContent = isPuzzleAgent
-        ? stripBinaryAndTruncate(rawSkillBlocks)
+        ? []
         : filterBinaryForMaxMode(rawSkillBlocks)
       const userContent: unknown[] = [
         ...(useAttachments ? attachmentContent : []),
@@ -1686,7 +1691,7 @@ export async function runProjectCollaboration(
       const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
       const agentModel = isPuzzleAgent ? 'claude-haiku-4-5-20251001' : resolveModel('deep')
       const agentMaxTokens = isPuzzleAgent ? 5000 : resolveMaxTokens('deep')
-      const agentTimeoutMs = isPuzzleAgent ? 180_000 : 300_000
+      const agentTimeoutMs = isPuzzleAgent ? 300_000 : 300_000
       const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
       const runOnce = async (content: unknown[]) => {
         const reqBody = {
@@ -1754,8 +1759,8 @@ export async function runProjectCollaboration(
       console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
       const readableError = toReadableApiError(e, `${agent.name} 협업 생성에 실패했습니다.`)
       // 디버깅 단서 보존: 다음 실패 시 사용자가 detail 카드에서 원본 error 종류·메시지·요청 메타를 확인 가능.
-      const reqMeta = (e as Error & { __reqMeta?: { endpoint: string; viaProxy: boolean; bodyKB: number } } | undefined)?.__reqMeta
-      const reqLine = reqMeta ? `\n— 요청 — ${reqMeta.endpoint} via=${reqMeta.viaProxy} body=${reqMeta.bodyKB}KB` : ''
+      const reqMeta = (e as Error & { __reqMeta?: { endpoint: string; viaProxy: boolean; bodyKB: number; build?: string } } | undefined)?.__reqMeta
+      const reqLine = reqMeta ? `\n— 요청 — ${reqMeta.endpoint} via=${reqMeta.viaProxy} body=${reqMeta.bodyKB}KB build=${reqMeta.build ?? '?'}` : ''
       const debugTrail = e instanceof Error
         ? `\n\n— 원본 오류 —\n${e.name}: ${(e.message ?? '').slice(0, 400)}${reqLine}`
         : ''
