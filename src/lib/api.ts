@@ -1513,8 +1513,12 @@ ${HTML_STYLE_GUIDE}`,
 핵심 산출물(플레이 타임라인·난이도 밸런스·엔딩 조건)은 반드시 포함되어야 합니다.
 ${HTML_STYLE_GUIDE}`,
   puzzle: `퍼즐 마스터 관점에서 HTML 시각화 기획안을 작성해주세요.
-스킬 파일의 레퍼런스를 참고해 이 퍼즐 구성에 가장 적합한 형식으로 자유롭게 설계하세요.
-핵심 산출물(퍼즐 흐름·X-KIT/Key/Dev 분류·잠금 연쇄 구조)은 반드시 포함되어야 합니다.
+핵심 산출물(퍼즐 흐름·X-KIT/Key/Dev 분류·잠금 연쇄 구조)을 **간결한 표 위주로** 정리하세요.
+중요: 장황한 서술·반복·부연 설명을 절대 쓰지 마세요. 핵심만 행 단위로 압축.
+- 퍼즐 흐름: 타임라인 표 1개 (섹션 5-7개 행, 각 행 1줄)
+- X-KIT/Key/Dev 분류: 표 1개 (10-15개 행 이내)
+- 잠금 연쇄 구조: 표 또는 간단한 다이어그램 1개
+HTML 전체는 짧게 유지 (큰 카드·반복 섹션 만들지 말 것).
 ${HTML_STYLE_GUIDE}`,
   space: `스페이스 디자이너 관점에서 HTML 시각화 기획안을 작성해주세요.
 스킬 파일의 레퍼런스를 참고해 이 공간 구성에 가장 적합한 형식으로 자유롭게 설계하세요.
@@ -1651,19 +1655,26 @@ export async function runProjectCollaboration(
         { type: 'text', text: promptText }
       ]
 
-      const thinkingOpts = resolveThinking('deep')
+      // 퍼즐 마스터는 HTML 시각화(잠금 연쇄·X-KIT/Key/Dev 분류) 생성량이 많아 timeout 빈발.
+      // extended thinking 비활성 + max_tokens 축소 + 타임아웃 연장으로 안정적 완료 보장.
+      const isPuzzleAgent = agentId === 'puzzle'
+      const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
+      const agentMaxTokens = isPuzzleAgent
+        ? Math.min(resolveMaxTokens('deep'), 8000)
+        : resolveMaxTokens('deep')
+      const agentTimeoutMs = isPuzzleAgent ? 480_000 : 300_000
       const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
       const runOnce = async (content: unknown[]) => {
         const reqBody = {
           model: resolveModel('deep'),
-          max_tokens: resolveMaxTokens('deep'),
+          max_tokens: agentMaxTokens,
           ...(thinkingOpts ? { thinking: thinkingOpts } : {}),
           system: getSystemPrompt(agent, cumulativeContext),
           messages: [{ role: 'user', content }],
         }
         return isMaxMode()
-          ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: 300_000 })
-          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: 300_000 })
+          ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
+          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
       }
 
       let result = await withRetry(() => runOnce(userContent))
