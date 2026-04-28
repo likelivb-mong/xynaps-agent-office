@@ -407,16 +407,6 @@ function pathForEdge(source: UserJourneyNode, target: UserJourneyNode) {
   return `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`
 }
 
-function pathForEdgeVertical(source: UserJourneyNode, target: UserJourneyNode) {
-  const NODE_H = 52
-  const sx = source.x + 82
-  const sy = source.y + NODE_H
-  const tx = target.x + 82
-  const ty = target.y
-  const mid = sy + (ty - sy) * 0.5
-  // 수직 → 수평 → 수직 꺾임 (엘보우): 곡선 없이 직선만 사용해 선 겹침 최소화
-  return `M ${sx} ${sy} L ${sx} ${mid} L ${tx} ${mid} L ${tx} ${ty}`
-}
 
 function midpoint(source: UserJourneyNode, target: UserJourneyNode) {
   return {
@@ -699,7 +689,7 @@ function layoutGraphVertical(graph: UserJourneyGraph): UserJourneyGraph {
 }
 
 function layoutGraph(graph: UserJourneyGraph): UserJourneyGraph {
-  return (graph.layoutDirection ?? 'vertical') === 'vertical'
+  return (graph.layoutDirection ?? 'horizontal') === 'vertical'
     ? layoutGraphVertical(graph)
     : layoutGraphLinear(graph)
 }
@@ -1075,6 +1065,16 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
     return ids
   }, [graph.edges, highlightFlowNodeId, highlightedFlowEdgeIds])
 
+  // 세로 모드 덴드로그램 렌더링용 — 부모별 자식 엣지 그룹
+  const edgesBySource = useMemo(() => {
+    const groups = new Map<string, UserJourneyEdge[]>()
+    graph.edges.forEach(edge => {
+      if (!groups.has(edge.source)) groups.set(edge.source, [])
+      groups.get(edge.source)!.push(edge)
+    })
+    return groups
+  }, [graph.edges])
+
   useEffect(() => {
     if (!selectedNode) return
     const current = selectedNode.style?.color ?? getNodeDefaultColor(selectedNode)
@@ -1162,7 +1162,7 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
   }
 
   const theme = (graph.theme ?? userFlow.theme ?? 'dark') === 'light' ? 'light' : 'dark'
-  const layoutDir = (graph.layoutDirection ?? 'vertical') as 'horizontal' | 'vertical'
+  const layoutDir = (graph.layoutDirection ?? 'horizontal') as 'horizontal' | 'vertical'
   const boardBg = theme === 'dark'
     ? 'radial-gradient(circle at 20% 0%, #0f1832 0%, #0b0f1b 55%, #090c15 100%)'
     : 'radial-gradient(circle at 20% 0%, #f9fafb 0%, #eef2f7 55%, #e6ecf4 100%)'
@@ -1502,48 +1502,110 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
                 <line key={`h-${i}`} x1={0} y1={i * 24} x2={CANVAS_WIDTH} y2={i * 24} stroke={theme === 'dark' ? '#ffffff08' : '#00000008'} strokeWidth={1} />
               ))}
 
-              {graph.edges.map(edge => {
-                const source = getNode(edge.source)
-                const target = getNode(edge.target)
-                if (!source || !target) return null
-                const path = layoutDir === 'vertical' ? pathForEdgeVertical(source, target) : pathForEdge(source, target)
-                const flowHighlighted = highlightedFlowEdgeIds.has(edge.id)
-                const targetRawColor = target.style?.color ?? getNodeDefaultColor(target)
-                const targetColor = theme === 'light' && isWhiteColor(targetRawColor) ? '#0f172a' : targetRawColor
-                const isDirectChildEdge = Boolean(highlightFlowNodeId) && edge.source === highlightFlowNodeId
-                const stroke = selectedEdgeId === edge.id
-                  ? '#8b5cf6'
-                  : flowHighlighted && highlightFlowColor
-                    ? isDirectChildEdge
-                      ? `${targetColor}cc`
-                      : `${highlightFlowColor}cc`
-                    : theme === 'dark'
-                      ? '#9ca3af99'
-                      : '#64748b99'
-                const strokeWidth = selectedEdgeId === edge.id ? 2.2 : flowHighlighted ? 2 : 1.35
-                return (
-                  <g key={edge.id} data-edge-id={edge.id} onMouseDown={e => onEdgeClick(e, edge.id)}>
-                    <path d={path} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" />
-                    {edge.label && (() => {
-                      const m = midpoint(source, target)
-                      return (
-                        <foreignObject x={m.x - 44} y={m.y - 16} width={88} height={26}>
-                          <div style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)',
-                            background: theme === 'dark' ? 'rgba(17,24,39,0.9)' : 'rgba(255,255,255,0.92)',
-                            fontSize: 10, fontWeight: 700,
-                            color: theme === 'dark' ? '#e5e7eb' : '#1f2937',
-                            padding: '2px 8px',
-                            width: 'fit-content',
-                            margin: '0 auto',
-                          }}>{edge.label}</div>
-                        </foreignObject>
-                      )
-                    })()}
-                  </g>
-                )
-              })}
+              {layoutDir === 'vertical' ? (
+                // 세로 모드: 덴드로그램 (부모→공유 수평 바→각 자식 수직 드롭) — 교차 없음
+                Array.from(edgesBySource.entries()).map(([sourceId, groupEdges]) => {
+                  const source = getNode(sourceId)
+                  if (!source) return null
+                  const children = groupEdges
+                    .map(e => ({ edge: e, node: getNode(e.target) }))
+                    .filter((x): x is { edge: UserJourneyEdge; node: UserJourneyNode } => Boolean(x.node))
+                  if (children.length === 0) return null
+
+                  const sx = source.x + 82
+                  const sy = source.y + 52
+                  const childYs = children.map(x => x.node.y)
+                  const childXs = children.map(x => x.node.x + 82)
+                  const junctionY = sy + (Math.min(...childYs) - sy) * 0.5
+                  const barMinX = Math.min(sx, ...childXs)
+                  const barMaxX = Math.max(sx, ...childXs)
+
+                  const groupHighlighted = groupEdges.some(e => highlightedFlowEdgeIds.has(e.id))
+                  const sharedStroke = groupHighlighted && highlightFlowColor
+                    ? `${highlightFlowColor}cc`
+                    : theme === 'dark' ? '#9ca3af99' : '#64748b99'
+                  const sharedW = groupHighlighted ? 2 : 1.35
+
+                  return (
+                    <g key={`dendro-${sourceId}`}>
+                      <line x1={sx} y1={sy} x2={sx} y2={junctionY} stroke={sharedStroke} strokeWidth={sharedW} strokeLinecap="round" />
+                      {children.length > 1 && (
+                        <line x1={barMinX} y1={junctionY} x2={barMaxX} y2={junctionY} stroke={sharedStroke} strokeWidth={sharedW} strokeLinecap="round" />
+                      )}
+                      {children.map(({ edge, node }) => {
+                        const cx = node.x + 82
+                        const isSelected = selectedEdgeId === edge.id
+                        const flowHighlighted = highlightedFlowEdgeIds.has(edge.id)
+                        const targetRawColor = node.style?.color ?? getNodeDefaultColor(node)
+                        const targetColor = theme === 'light' && isWhiteColor(targetRawColor) ? '#0f172a' : targetRawColor
+                        const dropStroke = isSelected
+                          ? '#8b5cf6'
+                          : flowHighlighted && highlightFlowColor
+                            ? edge.source === highlightFlowNodeId ? `${targetColor}cc` : `${highlightFlowColor}cc`
+                            : theme === 'dark' ? '#9ca3af99' : '#64748b99'
+                        const dropW = isSelected ? 2.2 : flowHighlighted ? 2 : 1.35
+                        const labelMidY = junctionY + (node.y - junctionY) * 0.5
+                        return (
+                          <g key={edge.id} data-edge-id={edge.id} onMouseDown={e => onEdgeClick(e, edge.id)}>
+                            <line x1={cx} y1={junctionY} x2={cx} y2={node.y} stroke={dropStroke} strokeWidth={dropW} strokeLinecap="round" />
+                            <line x1={cx} y1={junctionY} x2={cx} y2={node.y} stroke="transparent" strokeWidth={12} />
+                            {edge.label && (
+                              <foreignObject x={cx - 44} y={labelMidY - 13} width={88} height={26}>
+                                <div style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)',
+                                  background: theme === 'dark' ? 'rgba(17,24,39,0.9)' : 'rgba(255,255,255,0.92)',
+                                  fontSize: 10, fontWeight: 700,
+                                  color: theme === 'dark' ? '#e5e7eb' : '#1f2937',
+                                  padding: '2px 8px', width: 'fit-content', margin: '0 auto',
+                                }}>{edge.label}</div>
+                              </foreignObject>
+                            )}
+                          </g>
+                        )
+                      })}
+                    </g>
+                  )
+                })
+              ) : (
+                // 가로 모드: per-edge 베지어
+                graph.edges.map(edge => {
+                  const source = getNode(edge.source)
+                  const target = getNode(edge.target)
+                  if (!source || !target) return null
+                  const path = pathForEdge(source, target)
+                  const flowHighlighted = highlightedFlowEdgeIds.has(edge.id)
+                  const targetRawColor = target.style?.color ?? getNodeDefaultColor(target)
+                  const targetColor = theme === 'light' && isWhiteColor(targetRawColor) ? '#0f172a' : targetRawColor
+                  const isDirectChildEdge = Boolean(highlightFlowNodeId) && edge.source === highlightFlowNodeId
+                  const stroke = selectedEdgeId === edge.id
+                    ? '#8b5cf6'
+                    : flowHighlighted && highlightFlowColor
+                      ? isDirectChildEdge ? `${targetColor}cc` : `${highlightFlowColor}cc`
+                      : theme === 'dark' ? '#9ca3af99' : '#64748b99'
+                  const strokeWidth = selectedEdgeId === edge.id ? 2.2 : flowHighlighted ? 2 : 1.35
+                  return (
+                    <g key={edge.id} data-edge-id={edge.id} onMouseDown={e => onEdgeClick(e, edge.id)}>
+                      <path d={path} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" />
+                      {edge.label && (() => {
+                        const m = midpoint(source, target)
+                        return (
+                          <foreignObject x={m.x - 44} y={m.y - 16} width={88} height={26}>
+                            <div style={{
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              borderRadius: 999, border: '1px solid rgba(255,255,255,0.15)',
+                              background: theme === 'dark' ? 'rgba(17,24,39,0.9)' : 'rgba(255,255,255,0.92)',
+                              fontSize: 10, fontWeight: 700,
+                              color: theme === 'dark' ? '#e5e7eb' : '#1f2937',
+                              padding: '2px 8px', width: 'fit-content', margin: '0 auto',
+                            }}>{edge.label}</div>
+                          </foreignObject>
+                        )
+                      })()}
+                    </g>
+                  )
+                })
+              )}
             </svg>
 
             {graph.nodes.map(node => {
