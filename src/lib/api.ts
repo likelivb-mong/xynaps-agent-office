@@ -195,8 +195,7 @@ export async function listGoogleDriveFolderMetadata(folderId: string, oauthToken
 
 const MAX_MODE_TEXT_LIMIT = 15000
 
-function filterBinaryForMaxMode(blocks: unknown[]): unknown[] {
-  if (!isMaxMode()) return blocks
+function stripBinaryAndTruncate(blocks: unknown[]): unknown[] {
   return blocks
     .filter((b: unknown) => {
       const type = (b as { type?: string }).type
@@ -209,6 +208,11 @@ function filterBinaryForMaxMode(blocks: unknown[]): unknown[] {
       }
       return b
     })
+}
+
+function filterBinaryForMaxMode(blocks: unknown[]): unknown[] {
+  if (!isMaxMode()) return blocks
+  return stripBinaryAndTruncate(blocks)
 }
 
 function buildFileContent(files: SkillFile[]) {
@@ -716,19 +720,26 @@ async function streamAnthropicRequest(
   // 케이스(요청 body 거대, CORS, 확장프로그램 등) 우회용. Edge 프록시는 이미 streaming pass-through.
   const endpoint = options?.viaProxy ? '/api/messages' : resolveEndpoint()
   const headers = options?.viaProxy ? { 'Content-Type': 'application/json' } : resolveApiHeaders()
+  const bodyJson = JSON.stringify({ ...body, stream: true })
+  // 진단용 메타데이터 — 실패 시 catch 블록이 detail 트레일에 부착해 사용자에게 노출.
+  const reqMeta = { endpoint, viaProxy: !!options?.viaProxy, bodyKB: Math.round(bodyJson.length / 1024) }
+  const tagError = (err: unknown): unknown => {
+    if (err instanceof Error) (err as Error & { __reqMeta?: typeof reqMeta }).__reqMeta = reqMeta
+    return err
+  }
 
   try {
     resetIdleTimer()
     const response = await fetch(endpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ ...body, stream: true }),
+      body: bodyJson,
       signal: controller.signal,
-    })
+    }).catch(e => { throw tagError(e) })
 
     if (!response.ok) {
-      const data = await response.json()
-      throw new Error(data.error?.message || 'API 오류')
+      const data = await response.json().catch(() => null)
+      throw tagError(new Error(data?.error?.message || `API 오류 (HTTP ${response.status})`))
     }
 
     const reader = response.body!.getReader()
@@ -764,9 +775,9 @@ async function streamAnthropicRequest(
         const reason = receivedFirstChunk
           ? `AI 응답이 ${window / 1000}초간 멈춰 자동 중단되었습니다.`
           : `AI 응답이 ${window / 1000}초 안에 시작되지 않아 자동 중단되었습니다.`
-        throw new Error(`${reason} 다시 시도해주세요.`)
+        throw tagError(new Error(`${reason} 다시 시도해주세요.`))
       }
-      throw e
+      throw tagError(e)
     }
     return text
   } finally {
@@ -1654,18 +1665,24 @@ export async function runProjectCollaboration(
     try {
       // 첫 에이전트에게만 첨부파일 포함 (컨텍스트 공유)
       const useAttachments = agentId === 'ceo' && attachmentContent.length > 0
-      const skillContent = filterBinaryForMaxMode(buildFileContent(agent.skills))
+      // 퍼즐 마스터는 단독 재실행에서 Sonnet 4.6 + max_tokens 5000 조합조차
+      // 첫 청크까지 240s 안에 못 들어와 재시도 루프(3회 × 240s = 12분) 에 갇히는 사례 발생.
+      // Haiku 4.5 로 강등해 첫 청크 1-3초 / 5000 token 출력 20-40초로 안정 완료.
+      // 또한 puzzle 만 withRetry 우회 — 실패 시 즉시 노출해 12분 hang 방지.
+      // 그리고 puzzle 의 skill 에서 binary(PDF/이미지)·과대 텍스트 제거 — 본문이
+      // Vercel Edge body limit (~4.5MB) 또는 브라우저 fetch 한계를 넘어서 발생하는
+      // TypeError(Failed to fetch) 우회.
+      const isPuzzleAgent = agentId === 'puzzle'
+      const rawSkillBlocks = buildFileContent(agent.skills)
+      const skillContent = isPuzzleAgent
+        ? stripBinaryAndTruncate(rawSkillBlocks)
+        : filterBinaryForMaxMode(rawSkillBlocks)
       const userContent: unknown[] = [
         ...(useAttachments ? attachmentContent : []),
         ...skillContent,
         { type: 'text', text: promptText }
       ]
 
-      // 퍼즐 마스터는 단독 재실행에서 Sonnet 4.6 + max_tokens 5000 조합조차
-      // 첫 청크까지 240s 안에 못 들어와 재시도 루프(3회 × 240s = 12분) 에 갇히는 사례 발생.
-      // Haiku 4.5 로 강등해 첫 청크 1-3초 / 5000 token 출력 20-40초로 안정 완료.
-      // 또한 puzzle 만 withRetry 우회 — 실패 시 즉시 노출해 12분 hang 방지.
-      const isPuzzleAgent = agentId === 'puzzle'
       const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
       const agentModel = isPuzzleAgent ? 'claude-haiku-4-5-20251001' : resolveModel('deep')
       const agentMaxTokens = isPuzzleAgent ? 5000 : resolveMaxTokens('deep')
@@ -1736,9 +1753,11 @@ export async function runProjectCollaboration(
       }
       console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
       const readableError = toReadableApiError(e, `${agent.name} 협업 생성에 실패했습니다.`)
-      // 디버깅 단서 보존: 다음 실패 시 사용자가 detail 카드에서 원본 error 종류·메시지를 확인 가능.
+      // 디버깅 단서 보존: 다음 실패 시 사용자가 detail 카드에서 원본 error 종류·메시지·요청 메타를 확인 가능.
+      const reqMeta = (e as Error & { __reqMeta?: { endpoint: string; viaProxy: boolean; bodyKB: number } } | undefined)?.__reqMeta
+      const reqLine = reqMeta ? `\n— 요청 — ${reqMeta.endpoint} via=${reqMeta.viaProxy} body=${reqMeta.bodyKB}KB` : ''
       const debugTrail = e instanceof Error
-        ? `\n\n— 원본 오류 —\n${e.name}: ${(e.message ?? '').slice(0, 400)}`
+        ? `\n\n— 원본 오류 —\n${e.name}: ${(e.message ?? '').slice(0, 400)}${reqLine}`
         : ''
       const report: AgentReport = {
         agentId,
