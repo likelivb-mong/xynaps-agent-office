@@ -1655,13 +1655,15 @@ export async function runProjectCollaboration(
         { type: 'text', text: promptText }
       ]
 
-      // 퍼즐 마스터는 HTML 시각화 생성량 때문에 Opus + thinking 조합으로 timeout 빈발.
-      // Sonnet 4.6 강제 + extended thinking 비활성 + max_tokens 5000 으로 안정적 1-2분 완료 보장.
+      // 퍼즐 마스터는 단독 재실행에서 Sonnet 4.6 + max_tokens 5000 조합조차
+      // 첫 청크까지 240s 안에 못 들어와 재시도 루프(3회 × 240s = 12분) 에 갇히는 사례 발생.
+      // Haiku 4.5 로 강등해 첫 청크 1-3초 / 5000 token 출력 20-40초로 안정 완료.
+      // 또한 puzzle 만 withRetry 우회 — 실패 시 즉시 노출해 12분 hang 방지.
       const isPuzzleAgent = agentId === 'puzzle'
       const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
-      const agentModel = isPuzzleAgent ? 'claude-sonnet-4-6' : resolveModel('deep')
+      const agentModel = isPuzzleAgent ? 'claude-haiku-4-5-20251001' : resolveModel('deep')
       const agentMaxTokens = isPuzzleAgent ? 5000 : resolveMaxTokens('deep')
-      const agentTimeoutMs = isPuzzleAgent ? 240_000 : 300_000
+      const agentTimeoutMs = isPuzzleAgent ? 180_000 : 300_000
       const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
       const runOnce = async (content: unknown[]) => {
         const reqBody = {
@@ -1676,7 +1678,9 @@ export async function runProjectCollaboration(
           : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
       }
 
-      let result = await withRetry(() => runOnce(userContent))
+      let result = isPuzzleAgent
+        ? await runOnce(userContent)
+        : await withRetry(() => runOnce(userContent))
 
       // 산출물이 "첨부 권한 요청" 안내문에 갇혔으면 1회 재시도. 첨부 없이도 진행하라는 강한 지시 추가.
       if (looksLikePlaceholder(result)) {
@@ -1726,11 +1730,15 @@ export async function runProjectCollaboration(
       }
       console.error(`[${agent.name}] 에이전트 오류 (raw):`, e)
       const readableError = toReadableApiError(e, `${agent.name} 협업 생성에 실패했습니다.`)
+      // 디버깅 단서 보존: 다음 실패 시 사용자가 detail 카드에서 원본 error 종류·메시지를 확인 가능.
+      const debugTrail = e instanceof Error
+        ? `\n\n— 원본 오류 —\n${e.name}: ${(e.message ?? '').slice(0, 400)}`
+        : ''
       const report: AgentReport = {
         agentId,
         agentName: agent.name,
         summary: '오류가 발생했습니다',
-        detail: readableError.message,
+        detail: readableError.message + debugTrail,
         status: 'done',
       }
       const existingIndex = reports.findIndex(item => item.agentId === agentId)
@@ -1739,7 +1747,7 @@ export async function runProjectCollaboration(
       // 에러 정보를 [요약]/[상세] 형태로 합쳐서 onProgress 에 전달.
       // 그렇지 않으면 스냅샷 리스너에서 result 가 undefined → summary/detail 이 rerun 초기 빈 값
       // 그대로 남아 "완료" 상태에 빈 카드가 표시되는 버그 발생.
-      onProgress(agentId, 'done', `[요약]오류가 발생했습니다\n\n[상세]${readableError.message}`)
+      onProgress(agentId, 'done', `[요약]오류가 발생했습니다\n\n[상세]${readableError.message}${debugTrail}`)
     }
   }
 
