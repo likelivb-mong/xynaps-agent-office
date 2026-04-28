@@ -390,7 +390,7 @@ function buildBaseGraph(userFlow: UserFlowConfig, sections: SectionLite[], steps
     edges,
     viewport: DEFAULT_VIEWPORT,
     theme: userFlow.theme ?? 'dark',
-    layoutDirection: 'vertical',
+    layoutDirection: 'horizontal',
   }
 }
 
@@ -403,8 +403,8 @@ function pathForEdge(source: UserJourneyNode, target: UserJourneyNode) {
   const sy = source.y + 26
   const tx = target.x
   const ty = target.y + 26
-  const bend = Math.max(60, Math.abs(tx - sx) * 0.28)
-  return `M ${sx} ${sy} C ${sx + bend} ${sy}, ${tx - bend} ${ty}, ${tx} ${ty}`
+  const midX = sx + (tx - sx) * 0.5
+  return `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`
 }
 
 
