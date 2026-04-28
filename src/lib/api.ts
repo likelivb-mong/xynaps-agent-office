@@ -691,7 +691,7 @@ async function streamMaxModeRequest(
 
 async function streamAnthropicRequest(
   body: Record<string, unknown>,
-  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void; timeoutMs?: number }
+  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void; timeoutMs?: number; viaProxy?: boolean }
 ): Promise<string> {
   const controller = new AbortController()
   const timeoutMs = options?.timeoutMs ?? 300_000
@@ -711,11 +711,17 @@ async function streamAnthropicRequest(
     }, ms)
   }
 
+  // viaProxy=true → same-origin POST to Vercel Edge function /api/messages.
+  // 브라우저 → api.anthropic.com 직접 호출이 TypeError(Failed to fetch) 로 실패하는
+  // 케이스(요청 body 거대, CORS, 확장프로그램 등) 우회용. Edge 프록시는 이미 streaming pass-through.
+  const endpoint = options?.viaProxy ? '/api/messages' : resolveEndpoint()
+  const headers = options?.viaProxy ? { 'Content-Type': 'application/json' } : resolveApiHeaders()
+
   try {
     resetIdleTimer()
-    const response = await fetch(resolveEndpoint(), {
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: resolveApiHeaders(),
+      headers,
       body: JSON.stringify({ ...body, stream: true }),
       signal: controller.signal,
     })
@@ -1675,7 +1681,7 @@ export async function runProjectCollaboration(
         }
         return isMaxMode()
           ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
-          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
+          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs, viaProxy: isPuzzleAgent })
       }
 
       let result = isPuzzleAgent
