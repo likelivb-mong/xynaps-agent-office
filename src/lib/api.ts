@@ -541,6 +541,32 @@ ${reportsText}
   return parseTaggedGameFlowResponse(taggedText)
 }
 
+function isRetriableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'AbortError' && /timeout/i.test(error.message)) return true
+  const msg = error.message.toLowerCase()
+  return (
+    msg.includes('overloaded') ||
+    msg.includes('rate_limit') ||
+    msg.includes('rate limit') ||
+    /\b5\d{2}\b/.test(msg)
+  )
+}
+
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (e) {
+      lastError = e
+      if (attempt === maxRetries || !isRetriableError(e)) throw e
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)))
+    }
+  }
+  throw lastError
+}
+
 function toReadableApiError(error: unknown, fallback: string): Error {
   if (error instanceof Error) {
     const message = error.message?.trim() || ''
@@ -583,9 +609,11 @@ const STREAM_IDLE_TIMEOUT_MS = 90_000
 
 async function streamMaxModeRequest(
   body: Record<string, unknown>,
-  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void }
+  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void; timeoutMs?: number }
 ): Promise<string> {
   const controller = new AbortController()
+  const timeoutMs = options?.timeoutMs ?? 300_000
+  const timer = window.setTimeout(() => controller.abort(new DOMException('timeout', 'AbortError')), timeoutMs)
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
   options?.signal?.addEventListener('abort', abortForward)
 
@@ -655,6 +683,7 @@ async function streamMaxModeRequest(
     }
     return text
   } finally {
+    clearTimeout(timer)
     if (idleTimer) clearTimeout(idleTimer)
     options?.signal?.removeEventListener('abort', abortForward)
   }
@@ -662,9 +691,11 @@ async function streamMaxModeRequest(
 
 async function streamAnthropicRequest(
   body: Record<string, unknown>,
-  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void }
+  options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void; timeoutMs?: number }
 ): Promise<string> {
   const controller = new AbortController()
+  const timeoutMs = options?.timeoutMs ?? 300_000
+  const timer = window.setTimeout(() => controller.abort(new DOMException('timeout', 'AbortError')), timeoutMs)
   const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
   options?.signal?.addEventListener('abort', abortForward)
 
@@ -733,6 +764,7 @@ async function streamAnthropicRequest(
     }
     return text
   } finally {
+    clearTimeout(timer)
     if (idleTimer) clearTimeout(idleTimer)
     options?.signal?.removeEventListener('abort', abortForward)
   }
@@ -1444,6 +1476,7 @@ const HTML_STYLE_GUIDE = `
 - 보고서 형식은 고정 템플릿을 따르지 않습니다.
 - 스킬 파일의 레퍼런스를 참고해 해당 테마와 산출물 성격에 가장 적합한 구조로 설계하세요.
 - 이모지(emoji) 사용 금지 — 요약과 HTML 상세 보고서 전체에서 이모지를 사용하지 마세요.
+- 간결성 원칙: 각 섹션은 핵심 정보만 담고 장황한 서술·중복·부연 설명을 배제하세요. 섹션 수는 최대 6개, 각 항목은 1-2줄 이내로 작성하세요.
 
 HTML 작성 규칙 (반드시 준수):
 - 모든 style은 inline으로만 작성 (외부 CSS, class 사용 금지)
@@ -1629,11 +1662,11 @@ export async function runProjectCollaboration(
           messages: [{ role: 'user', content }],
         }
         return isMaxMode()
-          ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk })
-          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk })
+          ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: 300_000 })
+          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: 300_000 })
       }
 
-      let result = await runOnce(userContent)
+      let result = await withRetry(() => runOnce(userContent))
 
       // 산출물이 "첨부 권한 요청" 안내문에 갇혔으면 1회 재시도. 첨부 없이도 진행하라는 강한 지시 추가.
       if (looksLikePlaceholder(result)) {
@@ -1647,7 +1680,7 @@ export async function runProjectCollaboration(
           ...skillContent,
           { type: 'text', text: promptText + retryNote },
         ]
-        result = await runOnce(retryContent)
+        result = await withRetry(() => runOnce(retryContent))
       }
 
       const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|<!--XYNAPS_HTML-->|$)/)
