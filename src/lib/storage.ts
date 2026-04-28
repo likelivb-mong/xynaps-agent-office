@@ -123,9 +123,14 @@ export async function syncProjectsFromSupabase(): Promise<void> {
     else remoteActive.push(p)
   }
 
-  // 일반 프로젝트 머지 (updatedAt 기준 최신)
+  // Supabase 기준으로 일반/휴지통 분류 결정 (다른 기기의 변경이 우선)
+  const remoteTrashIds = new Set(remoteTrash.map(p => p.id))
+  const remoteActiveIds = new Set(remoteActive.map(p => p.id))
+
+  // 일반 프로젝트 머지: 다른 기기에서 휴지통으로 옮긴 ID는 제외
   const mergedActive = new Map<string, Project>()
   for (const p of [...localProjects, ...remoteActive]) {
+    if (remoteTrashIds.has(p.id)) continue
     const existing = mergedActive.get(p.id)
     if (!existing || p.updatedAt > existing.updatedAt) mergedActive.set(p.id, p)
   }
@@ -134,9 +139,10 @@ export async function syncProjectsFromSupabase(): Promise<void> {
   )
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(sortedActive))
 
-  // 휴지통 머지 (deletedAt 기준 최신)
+  // 휴지통 머지: 다른 기기에서 복원한 ID는 제외
   const mergedTrash = new Map<string, TrashedProject>()
   for (const p of [...localTrash, ...remoteTrash]) {
+    if (remoteActiveIds.has(p.id)) continue
     const existing = mergedTrash.get(p.id)
     if (!existing || p.deletedAt > existing.deletedAt) mergedTrash.set(p.id, p)
   }
