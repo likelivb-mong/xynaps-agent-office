@@ -708,10 +708,12 @@ async function streamMaxModeRequest(
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
         buf = lines.pop() ?? ''
+        let done2 = false
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           const raw = line.slice(6).trim()
-          if (!raw || raw === '[DONE]') continue
+          if (!raw) continue
+          if (raw === '[DONE]') { done2 = true; break }
           let evt: { type: string; text?: string; message?: string }
           try { evt = JSON.parse(raw) } catch { continue }
           if (evt.type === 'delta' && evt.text) {
@@ -721,6 +723,7 @@ async function streamMaxModeRequest(
             throw new Error(evt.message || 'CLI 오류')
           }
         }
+        if (done2) { reader.cancel().catch(() => {}); break }
       }
     } catch (e) {
       if (stalled) {
@@ -805,6 +808,7 @@ async function streamAnthropicRequest(
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
         buf = lines.pop() ?? ''
+        let messageStop = false
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
           const raw = line.slice(6).trim()
@@ -814,9 +818,13 @@ async function streamAnthropicRequest(
             if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
               text += evt.delta.text
               options?.onChunk?.(text)
+            } else if (evt.type === 'message_stop') {
+              // Anthropic 이 응답을 완전히 끝냈다는 신호 — HTTP 연결이 닫힐 때까지 기다리지 않고 즉시 종료.
+              messageStop = true
             }
           } catch { /* skip malformed */ }
         }
+        if (messageStop) { reader.cancel().catch(() => {}); break }
       }
     } catch (e) {
       if (stalled) {
