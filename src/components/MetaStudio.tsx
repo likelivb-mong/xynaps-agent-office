@@ -2833,29 +2833,26 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     if (flowSketchVisible && flowSketchSections.length > 0) {
       for (const section of flowSketchSections) {
         ctx.save()
-        ctx.fillStyle = `${section.color}22`
-        ctx.strokeStyle = `${section.color}aa`
-        ctx.lineWidth = 1
+        ctx.fillStyle = `${section.color}40`
         for (const c of section.cells) {
-          const px = c.x * TILE
-          const py = c.y * TILE
-          ctx.fillRect(px, py, TILE, TILE)
-          ctx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1)
+          ctx.fillRect(c.x * TILE, c.y * TILE, TILE, TILE)
         }
-        let labelX = Number.MAX_SAFE_INTEGER
-        let labelY = Number.MAX_SAFE_INTEGER
-        for (const c of section.cells) {
-          if (c.y < labelY || (c.y === labelY && c.x < labelX)) {
-            labelX = c.x
-            labelY = c.y
+        // single outer border around bounding box (no per-cell stroke)
+        if (section.cells.length > 0) {
+          let minX = section.cells[0].x, maxX = section.cells[0].x
+          let minY = section.cells[0].y, maxY = section.cells[0].y
+          for (const c of section.cells) {
+            if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x
+            if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y
           }
-        }
-        if (labelX !== Number.MAX_SAFE_INTEGER) {
+          ctx.strokeStyle = `${section.color}cc`
+          ctx.lineWidth = 1.5
+          ctx.strokeRect(minX * TILE + 0.5, minY * TILE + 0.5, (maxX - minX + 1) * TILE - 1, (maxY - minY + 1) * TILE - 1)
           ctx.fillStyle = section.color
           ctx.font = 'bold 11px ui-sans-serif'
           ctx.textAlign = 'left'
           ctx.textBaseline = 'top'
-          ctx.fillText(section.alpha, labelX * TILE + 4, labelY * TILE + 3)
+          ctx.fillText(section.alpha, minX * TILE + 4, minY * TILE + 3)
         }
         ctx.restore()
       }
