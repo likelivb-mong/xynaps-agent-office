@@ -73,7 +73,13 @@ function resolveApiHeaders(): Record<string, string> {
 
 function getServerUrl(): string {
   try {
-    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').localServerUrl || 'https://localhost:3001'
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').localServerUrl
+    if (!stored) return 'https://localhost:3001'
+    // 로컬 서버는 HTTPS only — 옛 'http://localhost:3001' 저장값은 즉시 정규화.
+    // SettingsContext.loadSettings 가 persist 하지만, 이 함수가 React state 와
+    // 무관하게 localStorage 를 직접 읽기 때문에 여기서도 한 번 더 정규화한다.
+    if (stored === 'http://localhost:3001') return 'https://localhost:3001'
+    return stored
   } catch { return 'https://localhost:3001' }
 }
 

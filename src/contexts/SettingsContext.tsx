@@ -19,16 +19,25 @@ export function loadSettings(): AppSettings {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return DEFAULT_SETTINGS
     const parsed = JSON.parse(raw)
+    let mutated = false
     // migrate legacy modelTier field
     if (parsed.modelTier && !parsed.modelQuality) {
       const tier = parsed.modelTier
       parsed.modelQuality = tier === 'Max구독연결' ? '최고' : (tier ?? '균형')
       parsed.useMax = tier === 'Max구독연결'
+      mutated = true
     }
     // legacy 'http://localhost:3001' 사용자는 자동 https:// 로 마이그레이션.
     // 직접 입력한 ngrok 등 외부 URL 은 그대로 둠.
     if (parsed.localServerUrl === 'http://localhost:3001') {
       parsed.localServerUrl = 'https://localhost:3001'
+      mutated = true
+    }
+    // 마이그레이션 결과를 localStorage 에 즉시 persist — 그렇지 않으면 api.ts 의
+    // getServerUrl() 처럼 React state 를 거치지 않고 localStorage 를 직접 읽는
+    // 코드가 다음 호출에서 옛 값을 그대로 쓰게 됨(이번 puzzle 실패의 직접 원인).
+    if (mutated) {
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed)) } catch { /* ignore quota */ }
     }
     return { ...DEFAULT_SETTINGS, ...parsed }
   } catch { return DEFAULT_SETTINGS }
