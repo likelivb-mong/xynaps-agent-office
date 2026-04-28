@@ -617,6 +617,47 @@ function toReadableApiError(error: unknown, fallback: string): Error {
 const STREAM_INITIAL_TIMEOUT_MS = 240_000
 const STREAM_IDLE_TIMEOUT_MS = 90_000
 
+// Max 모드에서 streaming 우회용 — 일부 모델/CLI 가 stdout 을 버퍼링해 청크가 후반에
+// 몰려오면 클라이언트의 90s idle timeout 이 fire 되는 케이스 회피. 서버는 stream:true
+// 가 없으면 자동으로 callClaudeCli (non-streaming) 분기로 들어가 한 번에 JSON 으로 반환.
+async function maxModeNonStreamRequest(
+  body: Record<string, unknown>,
+  options?: { signal?: AbortSignal; timeoutMs?: number }
+): Promise<string> {
+  const controller = new AbortController()
+  const timeoutMs = options?.timeoutMs ?? 600_000
+  const timer = window.setTimeout(() => controller.abort(new DOMException('timeout', 'AbortError')), timeoutMs)
+  const abortForward = () => controller.abort(new DOMException('aborted', 'AbortError'))
+  options?.signal?.addEventListener('abort', abortForward)
+
+  const endpoint = `${getServerUrl()}/api/messages`
+  const bodyJson = JSON.stringify(body)
+  const reqMeta = { endpoint, viaProxy: false, bodyKB: Math.round(bodyJson.length / 1024), build: 'v5-nostream' }
+  const tagError = (err: unknown): unknown => {
+    if (err instanceof Error) (err as Error & { __reqMeta?: typeof reqMeta }).__reqMeta = reqMeta
+    return err
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: bodyJson,
+      signal: controller.signal,
+    }).catch(e => { throw tagError(e) })
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      throw tagError(new Error(data?.error?.message || `API 오류 (HTTP ${res.status})`))
+    }
+    const data = await res.json().catch(() => null) as { content?: Array<{ type?: string; text?: string }> } | null
+    const text = data?.content?.find(b => b.type === 'text')?.text ?? ''
+    return text
+  } finally {
+    clearTimeout(timer)
+    options?.signal?.removeEventListener('abort', abortForward)
+  }
+}
+
 async function streamMaxModeRequest(
   body: Record<string, unknown>,
   options?: { signal?: AbortSignal; onChunk?: (accumulated: string) => void; timeoutMs?: number }
@@ -729,7 +770,7 @@ async function streamAnthropicRequest(
   const bodyJson = JSON.stringify({ ...body, stream: true })
   // 진단용 메타데이터 — 실패 시 catch 블록이 detail 트레일에 부착해 사용자에게 노출.
   // build='v4' 마커: 사용자가 이 줄을 트레일에서 보면 최신 번들 사용 중임을 확정.
-  const reqMeta = { endpoint, viaProxy: !!options?.viaProxy, bodyKB: Math.round(bodyJson.length / 1024), build: 'v4' }
+  const reqMeta = { endpoint, viaProxy: !!options?.viaProxy, bodyKB: Math.round(bodyJson.length / 1024), build: 'v5' }
   console.info('[xynaps] streamRequest', reqMeta)
   const tagError = (err: unknown): unknown => {
     if (err instanceof Error) (err as Error & { __reqMeta?: typeof reqMeta }).__reqMeta = reqMeta
@@ -1697,7 +1738,9 @@ export async function runProjectCollaboration(
       const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
       const agentModel = isPuzzleAgent ? 'claude-haiku-4-5-20251001' : resolveModel('deep')
       const agentMaxTokens = isPuzzleAgent ? 5000 : resolveMaxTokens('deep')
-      const agentTimeoutMs = isPuzzleAgent ? 300_000 : 300_000
+      // Max 모드의 puzzle 은 Claude CLI stdout 버퍼링 때문에 streaming 시 idle timeout
+      // 이 자주 fire — non-stream 으로 우회하므로 timeout 만 길게(10분) 잡고 idle 은 무시.
+      const agentTimeoutMs = isPuzzleAgent ? 600_000 : 300_000
       const onChunk = (text: string) => onProgress(agentId, 'streaming', text)
       const runOnce = async (content: unknown[]) => {
         const reqBody = {
@@ -1707,9 +1750,13 @@ export async function runProjectCollaboration(
           system: getSystemPrompt(agent, cumulativeContext),
           messages: [{ role: 'user', content }],
         }
-        return isMaxMode()
-          ? streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
-          : streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs, viaProxy: isPuzzleAgent })
+        if (isMaxMode()) {
+          // 퍼즐만 non-stream 으로. 다른 에이전트는 progress 표시를 위해 streaming 유지.
+          return isPuzzleAgent
+            ? maxModeNonStreamRequest(reqBody, { signal: options?.signal, timeoutMs: agentTimeoutMs })
+            : streamMaxModeRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs })
+        }
+        return streamAnthropicRequest(reqBody, { signal: options?.signal, onChunk, timeoutMs: agentTimeoutMs, viaProxy: isPuzzleAgent })
       }
 
       let result = isPuzzleAgent
