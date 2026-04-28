@@ -2489,7 +2489,6 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   const [devRules, setDevRules] = useState<DevRule[]>([])
   const [firedRules, setFiredRules] = useState<Set<string>>(new Set())
   const [buildingRule, setBuildingRule] = useState<BuildingRule | null>(null)
-  // canvasViewW removed — canvas container always matches W * canvasZoom
   const [canvasViewH, setCanvasViewH] = useState(H + 40)
   const [canvasZoom, setCanvasZoom] = useState(1)
   const [gridTheme, setGridTheme] = useState<'dark' | 'light'>('light')
@@ -3663,7 +3662,13 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      background: gridTheme === 'light' ? '#d4cfc8' : '#727780',
+      backgroundImage: `repeating-linear-gradient(to right, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE}px), repeating-linear-gradient(to bottom, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE}px)`,
+      backgroundSize: `${TILE}px ${TILE}px`,
+      borderRadius: 12, padding: 8,
+    }}>
 
       {/* ── Toolbar ── */}
       {mode === 'edit' ? (
@@ -4077,7 +4082,9 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
             overflow: 'auto',
             border: 'none',
             borderRadius: 12,
-            background: gridTheme === 'light' ? '#ddd8cf' : '#6c7179',
+            background: gridTheme === 'light' ? '#d4cfc8' : '#727780',
+            backgroundImage: `repeating-linear-gradient(to right, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE * canvasZoom}px), repeating-linear-gradient(to bottom, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 0px, ${gridTheme === 'light' ? 'rgba(175,168,160,0.55)' : 'rgba(100,106,114,0.6)'} 1px, transparent 1px, transparent ${TILE * canvasZoom}px)`,
+            backgroundSize: `${TILE * canvasZoom}px ${TILE * canvasZoom}px`,
             maxHeight: canvasViewH,
             boxSizing: 'border-box',
             boxShadow: '0 0 0 1px var(--border), 0 8px 32px rgba(0,0,0,0.45)',
