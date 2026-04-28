@@ -1,7 +1,4 @@
 {
-  "functions": {
-    "api/messages.ts": { "maxDuration": 60 }
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
