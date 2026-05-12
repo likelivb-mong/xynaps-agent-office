@@ -372,7 +372,6 @@ export default function AudioScriptTable({ script, onChange }: AudioScriptTableP
         <div key={track.id} style={{
           border: '1px solid var(--border)',
           borderRadius: 10,
-          overflow: 'hidden',
           background: 'var(--bg-card)',
         }}>
           <TrackHeader
