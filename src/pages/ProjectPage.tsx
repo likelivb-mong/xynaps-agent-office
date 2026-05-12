@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion } from '../lib/storage'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase } from '../lib/storage'
 import { GroupBriefingChat } from '../components/briefing/GroupBriefingChat'
 import { compileGameFlow, compileAudioScript } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
@@ -292,6 +292,26 @@ export function ProjectPage() {
   }
 
   useEffect(() => { reload() }, [id])
+
+  // 다른 기기에서 한 변경 사항을 Supabase에서 끌어와 반영
+  // - 페이지 진입 시 1회
+  // - 창에 포커스가 돌아오거나 탭이 다시 보일 때마다
+  useEffect(() => {
+    let cancelled = false
+    const pull = () => {
+      syncProjectsFromSupabase().then(() => { if (!cancelled) reload() })
+    }
+    pull()
+    const onFocus = () => pull()
+    const onVisible = () => { if (document.visibilityState === 'visible') pull() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [id])
 
   const activeVersion = project?.versions.find(v => v.id === activeVersionId) || null
 

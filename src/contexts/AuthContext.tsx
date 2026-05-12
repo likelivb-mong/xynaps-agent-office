@@ -31,6 +31,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (!supabase) {
+      setLoading(false)
+      return
+    }
     // 현재 세션 확인
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -59,13 +63,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!ALLOWED_USERS[email]) {
       return { error: '접근 권한이 없습니다.' }
     }
+    if (!supabase) return { error: 'Supabase가 설정되지 않았습니다.' }
     const { error } = await supabase.auth.signInWithPassword({ email, password: pin })
     if (error) return { error: 'PIN이 올바르지 않습니다.' }
     return { error: null }
   }
 
   async function signOut() {
-    await supabase.auth.signOut()
+    if (supabase) await supabase.auth.signOut()
     setUser(null)
     setSession(null)
   }
