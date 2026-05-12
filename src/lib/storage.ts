@@ -9,7 +9,8 @@ const COMMON_SKILLS_KEY = 'xynaps_v2_common_skills'
 // ── Supabase 동기화 ────────────────────────────────────────────────────────────
 
 async function sbUpsertProject(project: Project): Promise<void> {
-  await supabase.from('projects').upsert({
+  if (!supabase) return
+  const { error } = await supabase.from('projects').upsert({
     id: project.id,
     data: project,
     owner_id: project.ownerId ?? null,
@@ -17,15 +18,19 @@ async function sbUpsertProject(project: Project): Promise<void> {
     created_at: project.createdAt,
     updated_at: project.updatedAt,
   })
+  if (error) console.error('[supabase] upsert project failed:', error.message, { id: project.id })
 }
 
 async function sbDeleteProject(projectId: string): Promise<void> {
-  await supabase.from('projects').delete().eq('id', projectId)
+  if (!supabase) return
+  const { error } = await supabase.from('projects').delete().eq('id', projectId)
+  if (error) console.error('[supabase] delete project failed:', error.message, { id: projectId })
 }
 
 // ── Supabase 스킬 동기화 ───────────────────────────────────────────────────────
 
 async function sbUpsertSkill(agentId: string, skill: SkillFile): Promise<void> {
+  if (!supabase) return
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { base64, url, ...meta } = skill as SkillFile & { base64?: string; url?: string }
   await supabase.from('agent_skills').upsert({
@@ -43,10 +48,12 @@ async function sbUpsertSkill(agentId: string, skill: SkillFile): Promise<void> {
 }
 
 async function sbDeleteSkill(skillId: string): Promise<void> {
+  if (!supabase) return
   await supabase.from('agent_skills').delete().eq('id', skillId)
 }
 
 export async function syncSkillsFromSupabase(): Promise<void> {
+  if (!supabase) return
   const { data, error } = await supabase
     .from('agent_skills')
     .select('agent_id,id,name,type,media_type,guide_prompt,knowledge_summary,enabled,uploaded_at')
@@ -105,11 +112,13 @@ export async function syncSkillsFromSupabase(): Promise<void> {
 
 /** Supabase → localStorage 동기화. 앱 로드 시 호출 */
 export async function syncProjectsFromSupabase(): Promise<void> {
+  if (!supabase) return
   const { data, error } = await supabase
     .from('projects')
     .select('data')
     .order('created_at', { ascending: false })
-  if (error || !data) return
+  if (error) { console.error('[supabase] sync projects failed:', error.message); return }
+  if (!data) return
 
   const allRemote: Project[] = data.map((row: { data: Project }) => row.data)
   const localProjects = getProjects()
