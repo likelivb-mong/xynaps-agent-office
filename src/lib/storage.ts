@@ -6,10 +6,38 @@ const PROJECTS_TRASH_KEY = 'xynaps_v2_projects_trash'
 const SKILLS_KEY = 'xynaps_v2_skills'
 const COMMON_SKILLS_KEY = 'xynaps_v2_common_skills'
 
+// ── 전역 저장 상태 (피그마 스타일 인디케이터용) ───────────────────────────────
+export type SaveStatus =
+  | { state: 'idle' }
+  | { state: 'saving' }
+  | { state: 'saved'; at: number }
+  | { state: 'error'; message: string }
+
+let currentSaveStatus: SaveStatus = { state: 'idle' }
+let pendingSaves = 0
+const saveStatusListeners = new Set<(s: SaveStatus) => void>()
+
+function emitSaveStatus(s: SaveStatus): void {
+  currentSaveStatus = s
+  saveStatusListeners.forEach(cb => cb(s))
+}
+
+export function getSaveStatus(): SaveStatus {
+  return currentSaveStatus
+}
+
+export function onSaveStatus(cb: (s: SaveStatus) => void): () => void {
+  saveStatusListeners.add(cb)
+  cb(currentSaveStatus)
+  return () => { saveStatusListeners.delete(cb) }
+}
+
 // ── Supabase 동기화 ────────────────────────────────────────────────────────────
 
 async function sbUpsertProject(project: Project): Promise<void> {
   if (!supabase) return
+  pendingSaves++
+  emitSaveStatus({ state: 'saving' })
   const { error } = await supabase.from('projects').upsert({
     id: project.id,
     data: project,
@@ -18,7 +46,13 @@ async function sbUpsertProject(project: Project): Promise<void> {
     created_at: project.createdAt,
     updated_at: project.updatedAt,
   })
-  if (error) console.error('[supabase] upsert project failed:', error.message, { id: project.id })
+  pendingSaves--
+  if (error) {
+    console.error('[supabase] upsert project failed:', error.message, { id: project.id })
+    emitSaveStatus({ state: 'error', message: error.message })
+  } else if (pendingSaves === 0) {
+    emitSaveStatus({ state: 'saved', at: Date.now() })
+  }
 }
 
 async function sbDeleteProject(projectId: string): Promise<void> {
@@ -187,8 +221,13 @@ export function saveProject(project: Project): void {
   if (idx >= 0) projects[idx] = project
   else projects.unshift(project)
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
-  // 백그라운드로 Supabase 동기화
-  sbUpsertProject(project)
+  // 백그라운드로 Supabase 동기화 (상태는 sbUpsertProject 내부에서 emit)
+  if (supabase) {
+    sbUpsertProject(project)
+  } else {
+    // Supabase 미설정 시 localStorage 쓰기는 즉시 완료
+    emitSaveStatus({ state: 'saved', at: Date.now() })
+  }
 }
 
 type TrashedProject = Project & { deletedAt: string }

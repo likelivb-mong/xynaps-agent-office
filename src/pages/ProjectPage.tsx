@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, SaveDiskIcon, CheckIcon, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase } from '../lib/storage'
+import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, HistoryIcon, WriteIcon } from '../components/ui/Icon'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase, onSaveStatus, getSaveStatus, type SaveStatus } from '../lib/storage'
 import { GroupBriefingChat } from '../components/briefing/GroupBriefingChat'
 import { compileGameFlow, compileAudioScript } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
@@ -247,7 +247,7 @@ export function ProjectPage() {
   const [generatingAudioScript, setGeneratingAudioScript] = useState(false)
   const [audioScriptError, setAudioScriptError] = useState<string | null>(null)
   const [gameFlowSyncedAt, setGameFlowSyncedAt] = useState<string | null>(null)
-  const [workspaceSaveStatus, setWorkspaceSaveStatus] = useState<'idle' | 'saved'>('idle')
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() => getSaveStatus())
   const [showWorkspaceHistory, setShowWorkspaceHistory] = useState(false)
   const [showVersionMenu, setShowVersionMenu] = useState(false)
   const [workspaceHistory, setWorkspaceHistory] = useState<Array<{ id: string; savedAt: string; payload: unknown }>>([])
@@ -293,6 +293,9 @@ export function ProjectPage() {
 
   useEffect(() => { reload() }, [id])
 
+  // 전역 저장 상태 구독 (피그마 스타일 상태 인디케이터)
+  useEffect(() => onSaveStatus(setSaveStatus), [])
+
   // 다른 기기에서 한 변경 사항을 Supabase에서 끌어와 반영
   // - 페이지 진입 시 1회
   // - 창에 포커스가 돌아오거나 탭이 다시 보일 때마다
@@ -319,7 +322,6 @@ export function ProjectPage() {
     if (!project || !activeVersion) return
     setWorkspaceHistory(loadWorkspaceHistory(activeTab))
     setShowWorkspaceHistory(false)
-    setWorkspaceSaveStatus('idle')
   }, [activeTab, project?.id, activeVersion?.id])
 
   useEffect(() => {
@@ -503,19 +505,6 @@ export function ProjectPage() {
     updateAgentReportChat(project.id, activeVersion.id, agentId as AgentId, chatHistory)
   }
 
-  function saveFinalReportManualEdit() {
-    if (!project || !activeVersion) return
-    const nextFinal: FinalReport = {
-      summary: stripOperatingBudgetSectionText(finalEditSummary.trim()),
-      detail: stripOperatingBudgetSectionText(finalEditDetail.trim()),
-      createdAt: new Date().toISOString(),
-    }
-    updateVersionReports(project.id, activeVersion.id, activeVersion.agentReports ?? [], nextFinal)
-    setFinalReport(nextFinal)
-    setFinalEditMode(false)
-    reload()
-  }
-
   async function generateGameFlow() {
     if (!project || !activeVersion) return
     requireConfirm('game-flow', () => _doGenerateGameFlow())
@@ -577,37 +566,6 @@ export function ProjectPage() {
     } finally {
       setGeneratingAudioScript(false)
     }
-  }
-
-  function handleWorkspaceSave() {
-    if (!project || !activeVersion) return
-    let payload: unknown = null
-    if (activeTab === 'reports') {
-      payload = {
-        agentReports: activeVersion.agentReports ?? [],
-        finalReport: activeVersion.finalReport ?? null,
-      }
-    } else if (activeTab === 'gameflow') {
-      payload = {
-        gameFlow: activeVersion.gameFlow ?? null,
-      }
-    } else {
-      payload = {
-        studioMap: localStorage.getItem(`xynaps_meta_map_${project.id}`),
-        studioHistory: localStorage.getItem(`xynaps_meta_hist_${project.id}`),
-      }
-    }
-    const entry = {
-      id: crypto.randomUUID(),
-      savedAt: new Date().toISOString(),
-      payload,
-    }
-    const next = [entry, ...workspaceHistory].slice(0, PAGE_HISTORY_MAX)
-    setWorkspaceHistory(next)
-    saveWorkspaceHistory(activeTab, next)
-    setWorkspaceSaveStatus('saved')
-    setShowWorkspaceHistory(false)
-    setTimeout(() => setWorkspaceSaveStatus('idle'), 1600)
   }
 
   function handleWorkspaceRestore(entry: { id: string; savedAt: string; payload: unknown }) {
@@ -777,6 +735,59 @@ export function ProjectPage() {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [generatingGameFlow])
+
+  // 최종 보고서 편집 자동 저장 (500ms 디바운스)
+  useEffect(() => {
+    if (!finalEditMode || !project || !activeVersion) return
+    const timer = window.setTimeout(() => {
+      const nextFinal: FinalReport = {
+        summary: stripOperatingBudgetSectionText(finalEditSummary.trim()),
+        detail: stripOperatingBudgetSectionText(finalEditDetail.trim()),
+        createdAt: new Date().toISOString(),
+      }
+      updateVersionReports(project.id, activeVersion.id, activeVersion.agentReports ?? [], nextFinal)
+      setFinalReport(nextFinal)
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [finalEditMode, finalEditSummary, finalEditDetail, project?.id, activeVersion?.id])
+
+  // 히스토리 자동 체크포인트 — 마지막 저장 후 5초 idle 시 한 번 push
+  useEffect(() => {
+    if (saveStatus.state !== 'saved') return
+    if (!project || !activeVersion) return
+    // 히스토리가 의미 있는 탭에서만 (setup/draft는 history 없음)
+    if (activeTab !== 'reports' && activeTab !== 'gameflow' && activeTab !== 'studio') return
+    const timer = window.setTimeout(() => {
+      autoCheckpointHistory()
+    }, 5000)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveStatus.state === 'saved' ? saveStatus.at : 0, activeTab, project?.id, activeVersion?.id])
+
+  function autoCheckpointHistory() {
+    if (!project || !activeVersion) return
+    let payload: unknown = null
+    if (activeTab === 'reports') {
+      payload = {
+        agentReports: activeVersion.agentReports ?? [],
+        finalReport: activeVersion.finalReport ?? null,
+      }
+    } else if (activeTab === 'gameflow') {
+      payload = { gameFlow: activeVersion.gameFlow ?? null }
+    } else if (activeTab === 'studio') {
+      payload = {
+        studioMap: localStorage.getItem(`xynaps_meta_map_${project.id}`),
+        studioHistory: localStorage.getItem(`xynaps_meta_hist_${project.id}`),
+      }
+    } else return
+    // 직전 항목과 동일한 페이로드면 push 안 함 (불필요한 중복 방지)
+    const lastPayload = workspaceHistory[0]?.payload
+    if (lastPayload && JSON.stringify(lastPayload) === JSON.stringify(payload)) return
+    const entry = { id: crypto.randomUUID(), savedAt: new Date().toISOString(), payload }
+    const next = [entry, ...workspaceHistory].slice(0, PAGE_HISTORY_MAX)
+    setWorkspaceHistory(next)
+    saveWorkspaceHistory(activeTab, next)
+  }
 
   if (!project) return null
 
@@ -1054,19 +1065,39 @@ export function ProjectPage() {
             </div>
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, position: 'relative', paddingRight: 2 }}>
-              <button
-                onClick={handleWorkspaceSave}
-                title={`${activeTab === 'setup' ? '기본 정보' : activeTab === 'draft' ? '초안' : activeTab === 'reports' ? '보고서' : activeTab === 'gameflow' ? '게임 플로우' : activeTab === 'workshop' ? '회의실' : '스튜디오'} 저장`}
-                style={{
-                  width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)',
-                  background: workspaceSaveStatus === 'saved' ? '#1a4a2a' : 'var(--bg-secondary)',
-                  color: workspaceSaveStatus === 'saved' ? '#4ade80' : 'var(--text-muted)',
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', marginBottom: -1,
-                }}
-              >
-                {workspaceSaveStatus === 'saved' ? <CheckIcon width={13} height={13} /> : <SaveDiskIcon width={13} height={13} />}
-              </button>
+              {(() => {
+                let text = '저장됨'
+                let color = '#9ca8be'
+                let bg = 'transparent'
+                let dot = '#4ade80'
+                let title = '모든 변경 사항이 자동 저장됩니다'
+                if (saveStatus.state === 'saving') {
+                  text = '저장 중…'; color = '#cbd5e1'; dot = '#fbbf24'
+                  title = '동기화 중'
+                } else if (saveStatus.state === 'error') {
+                  text = '저장 실패'; color = '#fca5a5'; bg = '#3b1d1d'; dot = '#ef4444'
+                  title = saveStatus.message
+                } else if (saveStatus.state === 'saved') {
+                  const sec = Math.max(0, Math.floor((Date.now() - saveStatus.at) / 1000))
+                  text = sec < 5 ? '저장됨 · 방금' : sec < 60 ? `저장됨 · ${sec}초 전` : `저장됨 · ${Math.floor(sec / 60)}분 전`
+                  color = '#9ca8be'; dot = '#4ade80'
+                }
+                return (
+                  <div
+                    title={title}
+                    style={{
+                      height: 30, padding: '0 10px', borderRadius: 8,
+                      border: '1px solid var(--border)', background: bg,
+                      color, fontSize: 11, fontWeight: 600,
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      marginBottom: -1,
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: 999, background: dot, display: 'inline-block' }} />
+                    {text}
+                  </div>
+                )
+              })()}
               <button
                 onClick={() => setShowWorkspaceHistory(v => !v)}
                 title="히스토리"
@@ -1834,11 +1865,7 @@ export function ProjectPage() {
                       />
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                         <button
-                          onClick={() => {
-                            setFinalEditMode(false)
-                            setFinalEditSummary(displayFinalClean.summary ?? '')
-                            setFinalEditDetail((finalDetailSplit?.plain || displayFinalClean.detail || '').trim())
-                          }}
+                          onClick={() => setFinalEditMode(false)}
                           style={{
                             height: 30,
                             padding: '0 12px',
@@ -1850,24 +1877,9 @@ export function ProjectPage() {
                             fontWeight: 600,
                             cursor: 'pointer',
                           }}
+                          title="변경 사항은 입력하는 즉시 자동 저장되었습니다. 되돌리려면 우측 히스토리에서 복원하세요."
                         >
-                          취소
-                        </button>
-                        <button
-                          onClick={saveFinalReportManualEdit}
-                          style={{
-                            height: 30,
-                            padding: '0 12px',
-                            borderRadius: 8,
-                            border: '1px solid var(--accent)',
-                            background: 'var(--accent)',
-                            color: 'var(--accent-fg)',
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          저장
+                          닫기
                         </button>
                       </div>
                     </div>
