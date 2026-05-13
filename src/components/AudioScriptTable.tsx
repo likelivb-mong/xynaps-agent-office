@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { AudioScript, AudioScriptTrack, AudioScriptRow, AudioChannel, AudioRowKind } from '../types'
 import { PlusIcon } from './ui/Icon'
 
@@ -80,22 +81,64 @@ function EditableCell({
 // ── ChannelBadge ─────────────────────────────────────────────────────────────
 function ChannelBadge({ channel, onChange }: { channel: AudioChannel; onChange: (c: AudioChannel) => void }) {
   const [open, setOpen] = useState(false)
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const cfg = CHANNEL_CONFIG[channel]
+
+  // 버튼 좌표를 viewport 기준으로 계산해 fixed 포지셔닝
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return
+    const updatePosition = () => {
+      const rect = btnRef.current!.getBoundingClientRect()
+      setMenuRect({ top: rect.bottom + 4, left: rect.left })
+    }
+    updatePosition()
+    window.addEventListener('scroll', updatePosition, true)
+    window.addEventListener('resize', updatePosition)
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true)
+      window.removeEventListener('resize', updatePosition)
+    }
+  }, [open])
+
+  // 바깥 클릭/Esc 닫기
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   return (
     <div style={{ position: 'relative', flexShrink: 0 }}>
-      <button onClick={() => setOpen(v => !v)} style={{
-        minWidth: 44, height: 26, borderRadius: 6, border: `1px solid ${cfg.border}`,
-        background: cfg.bg, color: cfg.color,
-        fontSize: 11, fontWeight: 700, cursor: 'pointer',
-        padding: '0 8px', letterSpacing: 0.5, transition: 'all 0.1s',
-      }}>{cfg.label}</button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 30, left: 0, zIndex: 100,
-          background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 8, padding: 4, display: 'flex', flexDirection: 'column', gap: 2,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)', minWidth: 72,
-        }}>
+      <button
+        ref={btnRef}
+        onClick={() => setOpen(v => !v)}
+        style={{
+          minWidth: 44, height: 26, borderRadius: 6, border: `1px solid ${cfg.border}`,
+          background: cfg.bg, color: cfg.color,
+          fontSize: 11, fontWeight: 700, cursor: 'pointer',
+          padding: '0 8px', letterSpacing: 0.5, transition: 'all 0.1s',
+        }}>{cfg.label}</button>
+      {open && menuRect && createPortal(
+        <div
+          ref={menuRef}
+          style={{
+            position: 'fixed', top: menuRect.top, left: menuRect.left, zIndex: 1000,
+            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            borderRadius: 8, padding: 4, display: 'flex', flexDirection: 'column', gap: 2,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)', minWidth: 72,
+          }}>
           {CHANNELS.map(ch => {
             const c = CHANNEL_CONFIG[ch]
             return (
@@ -111,7 +154,8 @@ function ChannelBadge({ channel, onChange }: { channel: AudioChannel; onChange: 
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
