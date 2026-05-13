@@ -1,5 +1,6 @@
 import type { Project, ProjectVersion, AgentReport, FinalReport, SkillFile, AgentId, BranchCode, CrimeConfig, GameFlowSheet, GameSystemType, ChatMessage, CollaborationStatus, WorkshopSession, MeetingMinutes } from '../types'
 import { supabase } from './supabase'
+import { safeGetItem, safeSetItem } from './storageCompression'
 
 const PROJECTS_KEY = 'xynaps_v2_projects'
 const PROJECTS_TRASH_KEY = 'xynaps_v2_projects_trash'
@@ -116,8 +117,8 @@ export async function syncSkillsFromSupabase(): Promise<void> {
   }
 
   // Merge with local (local wins if same id — local may have base64)
-  const localSkills = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}') as Record<string, SkillFile[]>
-  const localCommon = JSON.parse(localStorage.getItem(COMMON_SKILLS_KEY) || '[]') as SkillFile[]
+  const localSkills = JSON.parse(safeGetItem(SKILLS_KEY) || '{}') as Record<string, SkillFile[]>
+  const localCommon = JSON.parse(safeGetItem(COMMON_SKILLS_KEY) || '[]') as SkillFile[]
 
   const mergedSkills: Record<string, SkillFile[]> = { ...localSkills }
   for (const [agentId, remoteList] of Object.entries(byAgent)) {
@@ -126,11 +127,11 @@ export async function syncSkillsFromSupabase(): Promise<void> {
     const newFromRemote = remoteList.filter(s => !localIds.has(s.id))
     mergedSkills[agentId] = [...localList, ...newFromRemote]
   }
-  localStorage.setItem(SKILLS_KEY, JSON.stringify(mergedSkills))
+  safeSetItem(SKILLS_KEY, JSON.stringify(mergedSkills))
 
   const localCommonIds = new Set(localCommon.map(s => s.id))
   const newCommon = commonList.filter(s => !localCommonIds.has(s.id))
-  localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify([...localCommon, ...newCommon]))
+  safeSetItem(COMMON_SKILLS_KEY, JSON.stringify([...localCommon, ...newCommon]))
 
   // 로컬에만 있는 스킬 Supabase에 업로드
   const remoteSkillIds = new Set(data.map((r: { id: string }) => r.id))
@@ -180,7 +181,7 @@ export async function syncProjectsFromSupabase(): Promise<void> {
   const sortedActive = Array.from(mergedActive.values()).sort(
     (a, b) => b.createdAt.localeCompare(a.createdAt)
   )
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(sortedActive))
+  safeSetItem(PROJECTS_KEY, JSON.stringify(sortedActive))
 
   // 휴지통 머지: 다른 기기에서 복원한 ID는 제외
   const mergedTrash = new Map<string, TrashedProject>()
@@ -192,7 +193,7 @@ export async function syncProjectsFromSupabase(): Promise<void> {
   const sortedTrash = Array.from(mergedTrash.values()).sort(
     (a, b) => b.deletedAt.localeCompare(a.deletedAt)
   )
-  localStorage.setItem(PROJECTS_TRASH_KEY, JSON.stringify(sortedTrash))
+  safeSetItem(PROJECTS_TRASH_KEY, JSON.stringify(sortedTrash))
 
   // 로컬에만 있는 항목들 Supabase 업로드 (휴지통 포함)
   const remoteIds = new Set(allRemote.map(p => p.id))
@@ -204,7 +205,7 @@ export async function syncProjectsFromSupabase(): Promise<void> {
 
 export function getProjects(): Project[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]') as Project[]
+    const raw = JSON.parse(safeGetItem(PROJECTS_KEY) || '[]') as Project[]
     return raw.map(p => ({
       ...p,
       branches: p.branches ?? [],
@@ -220,7 +221,7 @@ export function saveProject(project: Project): void {
   const idx = projects.findIndex(p => p.id === project.id)
   if (idx >= 0) projects[idx] = project
   else projects.unshift(project)
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
+  safeSetItem(PROJECTS_KEY, JSON.stringify(projects))
   // 백그라운드로 Supabase 동기화 (상태는 sbUpsertProject 내부에서 emit)
   if (supabase) {
     sbUpsertProject(project)
@@ -234,13 +235,13 @@ type TrashedProject = Project & { deletedAt: string }
 
 export function getTrashedProjects(): TrashedProject[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(PROJECTS_TRASH_KEY) || '[]') as TrashedProject[]
+    const raw = JSON.parse(safeGetItem(PROJECTS_TRASH_KEY) || '[]') as TrashedProject[]
     return raw
   } catch { return [] }
 }
 
 function saveTrashedProjects(projects: TrashedProject[]): void {
-  localStorage.setItem(PROJECTS_TRASH_KEY, JSON.stringify(projects))
+  safeSetItem(PROJECTS_TRASH_KEY, JSON.stringify(projects))
 }
 
 export function moveProjectToTrash(projectId: string): void {
@@ -248,7 +249,7 @@ export function moveProjectToTrash(projectId: string): void {
   const target = projects.find(p => p.id === projectId)
   if (!target) return
   const nextProjects = projects.filter(p => p.id !== projectId)
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects))
+  safeSetItem(PROJECTS_KEY, JSON.stringify(nextProjects))
 
   const trashed: TrashedProject = { ...target, deletedAt: new Date().toISOString() }
   const trash = getTrashedProjects().filter(p => p.id !== projectId)
@@ -416,7 +417,7 @@ export function clearStaleCollaborationStatuses(): void {
     }
   }
   if (changed) {
-    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
+    safeSetItem(PROJECTS_KEY, JSON.stringify(projects))
   }
 }
 
@@ -519,42 +520,42 @@ export function setAgentReportActiveVersion(
 
 export function deleteProject(projectId: string): void {
   const projects = getProjects().filter(p => p.id !== projectId)
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
+  safeSetItem(PROJECTS_KEY, JSON.stringify(projects))
   sbDeleteProject(projectId)
 }
 
 // 스킬 파일 관리
 export function getAgentSkills(agentId: AgentId): SkillFile[] {
   try {
-    const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
+    const all = JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
     return all[agentId] || []
   } catch { return [] }
 }
 
 export function saveAgentSkill(agentId: AgentId, skill: SkillFile): void {
   try {
-    const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
+    const all = JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
     if (!all[agentId]) all[agentId] = []
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { base64, url, ...meta } = skill
     all[agentId].push(meta)
-    localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
+    safeSetItem(SKILLS_KEY, JSON.stringify(all))
     sbUpsertSkill(agentId, skill)
   } catch (e) { console.error(e) }
 }
 
 export function removeAgentSkill(agentId: AgentId, skillId: string): void {
   try {
-    const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
+    const all = JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
     if (all[agentId]) all[agentId] = all[agentId].filter((s: SkillFile) => s.id !== skillId)
-    localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
+    safeSetItem(SKILLS_KEY, JSON.stringify(all))
     sbDeleteSkill(skillId)
   } catch (e) { console.error(e) }
 }
 
 export function getAllSkills(): Record<AgentId, SkillFile[]> {
   try {
-    return JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
+    return JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
   } catch { return {} as Record<AgentId, SkillFile[]> }
 }
 
@@ -615,7 +616,7 @@ export function completeGroupBriefing(
 
 // 공통 스킬 관리
 export function getCommonSkills(): SkillFile[] {
-  try { return JSON.parse(localStorage.getItem(COMMON_SKILLS_KEY) || '[]') } catch { return [] }
+  try { return JSON.parse(safeGetItem(COMMON_SKILLS_KEY) || '[]') } catch { return [] }
 }
 
 export function saveCommonSkill(skill: SkillFile): void {
@@ -624,14 +625,14 @@ export function saveCommonSkill(skill: SkillFile): void {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { base64, url, ...meta } = skill
     all.push(meta)
-    localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(all))
+    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(all))
     sbUpsertSkill('common', skill)
   } catch (e) { console.error(e) }
 }
 
 export function removeCommonSkill(skillId: string): void {
   try {
-    localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(
+    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(
       getCommonSkills().filter(s => s.id !== skillId)
     ))
     sbDeleteSkill(skillId)
@@ -643,7 +644,7 @@ export function updateCommonSkillKnowledge(skillId: string, summary: string): vo
     const skills = getCommonSkills()
     const idx = skills.findIndex(s => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], knowledgeSummary: summary }
-    localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(skills))
+    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(skills))
   } catch (e) { console.error(e) }
 }
 
@@ -652,29 +653,29 @@ export function patchCommonSkill(skillId: string, updates: Partial<import('../ty
     const skills = getCommonSkills()
     const idx = skills.findIndex(s => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], ...updates }
-    localStorage.setItem(COMMON_SKILLS_KEY, JSON.stringify(skills))
+    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(skills))
   } catch (e) { console.error(e) }
 }
 
 export function patchAgentSkill(agentId: AgentId, skillId: string, updates: Partial<import('../types').SkillFile>): void {
   try {
-    const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
+    const all = JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
     const skills: import('../types').SkillFile[] = all[agentId] || []
     const idx = skills.findIndex(s => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], ...updates }
     all[agentId] = skills
-    localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
+    safeSetItem(SKILLS_KEY, JSON.stringify(all))
   } catch (e) { console.error(e) }
 }
 
 export function updateSkillKnowledge(agentId: AgentId, skillId: string, summary: string): void {
   try {
-    const all = JSON.parse(localStorage.getItem(SKILLS_KEY) || '{}')
+    const all = JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
     const skills: SkillFile[] = all[agentId] || []
     const idx = skills.findIndex((s: SkillFile) => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], knowledgeSummary: summary }
     all[agentId] = skills
-    localStorage.setItem(SKILLS_KEY, JSON.stringify(all))
+    safeSetItem(SKILLS_KEY, JSON.stringify(all))
   } catch (e) { console.error(e) }
 }
 

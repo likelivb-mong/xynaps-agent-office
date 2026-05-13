@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { getProjects } from '../lib/storage'
+import { safeGetItem, safeSetItem } from '../lib/storageCompression'
 import type { GameFlowSection, GameFlowSheet, GameStep } from '../types'
 import {
   ButtonPressIcon, FolderOpenIcon, LockIcon, BoxArrowDownIcon, HandRemoveIcon, KeyTriggerIcon,
@@ -61,18 +62,18 @@ function getMapKey(projectId: string) { return `xynaps_meta_map_${projectId}` }
 function getHistoryKey(projectId: string) { return `xynaps_meta_hist_${projectId}` }
 
 function loadMapSnapshot(projectId: string): MapSnapshot | null {
-  try { return JSON.parse(localStorage.getItem(getMapKey(projectId)) || 'null') }
+  try { return JSON.parse(safeGetItem(getMapKey(projectId)) || 'null') }
   catch { return null }
 }
 function loadHistory(projectId: string): HistoryEntry[] {
-  try { return JSON.parse(localStorage.getItem(getHistoryKey(projectId)) || '[]') }
+  try { return JSON.parse(safeGetItem(getHistoryKey(projectId)) || '[]') }
   catch { return [] }
 }
 function persistSnapshot(projectId: string, snap: MapSnapshot, hist: HistoryEntry[]) {
   const entry: HistoryEntry = { id: crypto.randomUUID(), savedAt: new Date().toISOString(), snapshot: snap }
   const next = [entry, ...hist].slice(0, MAX_HISTORY)
-  localStorage.setItem(getMapKey(projectId), JSON.stringify(snap))
-  localStorage.setItem(getHistoryKey(projectId), JSON.stringify(next))
+  safeSetItem(getMapKey(projectId), JSON.stringify(snap))
+  safeSetItem(getHistoryKey(projectId), JSON.stringify(next))
   return next
 }
 interface MItem { id: string; name: string; cat: Cat; w: number; h: number }
