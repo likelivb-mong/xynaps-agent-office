@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, HistoryIcon, WriteIcon } from '../components/ui/Icon'
 import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase, onSaveStatus, getSaveStatus, type SaveStatus } from '../lib/storage'
+import { safeGetItem, safeSetItem } from '../lib/storageCompression'
 import { GroupBriefingChat } from '../components/briefing/GroupBriefingChat'
 import { compileGameFlow, compileAudioScript } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
@@ -269,7 +270,7 @@ export function ProjectPage() {
     const key = getWorkspaceHistoryKey(tab)
     if (!key) return []
     try {
-      const parsed = JSON.parse(localStorage.getItem(key) || '[]')
+      const parsed = JSON.parse(safeGetItem(key) || '[]')
       return Array.isArray(parsed) ? parsed : []
     } catch {
       return []
@@ -279,7 +280,7 @@ export function ProjectPage() {
   function saveWorkspaceHistory(tab: 'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop', history: Array<{ id: string; savedAt: string; payload: unknown }>) {
     const key = getWorkspaceHistoryKey(tab)
     if (!key) return
-    localStorage.setItem(key, JSON.stringify(history))
+    safeSetItem(key, JSON.stringify(history))
   }
 
   function reload() {
@@ -584,10 +585,10 @@ export function ProjectPage() {
       } else {
         const payload = entry.payload as { studioMap?: string | null; studioHistory?: string | null }
         if (payload.studioMap !== undefined && payload.studioMap !== null) {
-          localStorage.setItem(`xynaps_meta_map_${project.id}`, payload.studioMap)
+          safeSetItem(`xynaps_meta_map_${project.id}`, payload.studioMap)
         }
         if (payload.studioHistory !== undefined && payload.studioHistory !== null) {
-          localStorage.setItem(`xynaps_meta_hist_${project.id}`, payload.studioHistory)
+          safeSetItem(`xynaps_meta_hist_${project.id}`, payload.studioHistory)
         }
         setStudioMountKey(prev => prev + 1)
       }
@@ -776,8 +777,8 @@ export function ProjectPage() {
       payload = { gameFlow: activeVersion.gameFlow ?? null }
     } else if (activeTab === 'studio') {
       payload = {
-        studioMap: localStorage.getItem(`xynaps_meta_map_${project.id}`),
-        studioHistory: localStorage.getItem(`xynaps_meta_hist_${project.id}`),
+        studioMap: safeGetItem(`xynaps_meta_map_${project.id}`),
+        studioHistory: safeGetItem(`xynaps_meta_hist_${project.id}`),
       }
     } else return
     // 직전 항목과 동일한 페이로드면 push 안 함 (불필요한 중복 방지)
