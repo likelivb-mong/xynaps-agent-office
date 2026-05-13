@@ -1,4 +1,4 @@
-import { useState, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import type { GameFlowSheet, GameFlowSection, GameStep } from '../types'
 import { ExportIcon, PlusIcon, SearchIcon, LockIcon, ZapIcon, GridTableIcon } from './ui/Icon'
 
@@ -131,7 +131,19 @@ interface GameFlowTableProps {
 export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [hoveredRow, setHoveredRow] = useState<string | null>(null)
+  // 드래그 앤 드롭 상태
+  const [armedDragId, setArmedDragId] = useState<string | null>(null)
+  const [draggingStep, setDraggingStep] = useState<{ secId: string; stepId: string } | null>(null)
+  const [dragOver, setDragOver] = useState<{ stepId: string; pos: 'before' | 'after' } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 핸들에서 마우스 떼면 armed 해제 (드래그 시작 안 하고 그냥 클릭한 경우)
+  useEffect(() => {
+    if (!armedDragId) return
+    const onUp = () => setArmedDragId(null)
+    window.addEventListener('mouseup', onUp)
+    return () => window.removeEventListener('mouseup', onUp)
+  }, [armedDragId])
 
   function updateSection(id: string, patch: Partial<GameFlowSection>) {
     onChange({ ...sheet, sections: sheet.sections.map(s => s.id === id ? { ...s, ...patch } : s) })
@@ -159,14 +171,42 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
     const sec = sheet.sections.find(s => s.id === secId)!
     updateSection(secId, { steps: renumberSteps(sec.steps.filter(st => st.id !== stepId)) })
   }
-  function moveStep(secId: string, stepId: string, dir: -1 | 1) {
-    const sec = sheet.sections.find(s => s.id === secId)!
-    const idx = sec.steps.findIndex(st => st.id === stepId)
-    const ni = idx + dir
-    if (ni < 0 || ni >= sec.steps.length) return
-    const steps = [...sec.steps];
-    [steps[idx], steps[ni]] = [steps[ni], steps[idx]]
+  // ── 드래그 앤 드롭 ─────────────────────────────────────────────────────────
+  function handleRowDragStart(e: React.DragEvent, secId: string, stepId: string) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', `${secId}:${stepId}`)
+    setDraggingStep({ secId, stepId })
+  }
+  function handleRowDragOver(e: React.DragEvent, secId: string, stepId: string) {
+    if (!draggingStep || draggingStep.secId !== secId) return // 같은 섹션 내에서만 허용
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    if (dragOver?.stepId !== stepId || dragOver.pos !== pos) {
+      setDragOver({ stepId, pos })
+    }
+  }
+  function handleRowDrop(e: React.DragEvent, secId: string, targetStepId: string) {
+    if (!draggingStep || draggingStep.secId !== secId) return
+    e.preventDefault()
+    const sec = sheet.sections.find(s => s.id === secId)
+    if (!sec) return
+    const fromIdx = sec.steps.findIndex(st => st.id === draggingStep.stepId)
+    let toIdx = sec.steps.findIndex(st => st.id === targetStepId)
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) { clearDrag(); return }
+    if (dragOver?.pos === 'after') toIdx++
+    const steps = [...sec.steps]
+    const [moved] = steps.splice(fromIdx, 1)
+    if (fromIdx < toIdx) toIdx-- // 제거 후 인덱스 보정
+    steps.splice(toIdx, 0, moved)
     updateSection(secId, { steps: renumberSteps(steps) })
+    clearDrag()
+  }
+  function clearDrag() {
+    setDraggingStep(null)
+    setDragOver(null)
+    setArmedDragId(null)
   }
   function toggleStepFlag(secId: string, stepId: string, field: FlagField, nextValue: boolean) {
     const sec = sheet.sections.find(s => s.id === secId)
@@ -376,8 +416,16 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
                     const isAuto = step.auto
                     const isHovered = hoveredRow === step.id
                     const isLast = rowIdx === section.steps.length - 1
+                    const isBeingDragged = draggingStep?.stepId === step.id
+                    const dropBefore = dragOver?.stepId === step.id && dragOver.pos === 'before' && draggingStep?.secId === section.id
+                    const dropAfter = dragOver?.stepId === step.id && dragOver.pos === 'after' && draggingStep?.secId === section.id
                     return (
                       <tr key={step.id}
+                        draggable={armedDragId === step.id}
+                        onDragStart={(e) => handleRowDragStart(e, section.id, step.id)}
+                        onDragOver={(e) => handleRowDragOver(e, section.id, step.id)}
+                        onDrop={(e) => handleRowDrop(e, section.id, step.id)}
+                        onDragEnd={clearDrag}
                         onMouseEnter={() => setHoveredRow(step.id)}
                         onMouseLeave={() => setHoveredRow(null)}
                         style={{
@@ -385,16 +433,30 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
                             ? 'rgba(100,116,139,0.06)'
                             : isHovered ? 'rgba(255,255,255,0.028)' : 'transparent',
                           transition: 'background 0.1s',
+                          opacity: isBeingDragged ? 0.35 : 1,
+                          boxShadow: dropBefore
+                            ? 'inset 0 2px 0 0 var(--accent)'
+                            : dropAfter
+                              ? 'inset 0 -2px 0 0 var(--accent)'
+                              : undefined,
                         }}>
 
-                        {/* 이동 컨트롤 */}
+                        {/* 드래그 핸들 */}
                         <td style={td(isLast)}>
-                          <div style={{
-                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-                            opacity: isHovered ? 1 : 0, transition: 'opacity 0.15s',
-                          }}>
-                            <button onClick={() => moveStep(section.id, step.id, -1)} style={iconBtn}>↑</button>
-                            <button onClick={() => moveStep(section.id, step.id, 1)} style={iconBtn}>↓</button>
+                          <div
+                            onMouseDown={() => setArmedDragId(step.id)}
+                            title="드래그하여 순서 변경"
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 20, height: 28, margin: '0 auto',
+                              opacity: isHovered || isBeingDragged ? 0.85 : 0.25,
+                              transition: 'opacity 0.15s',
+                              cursor: armedDragId === step.id ? 'grabbing' : 'grab',
+                              color: 'var(--text-muted)',
+                              userSelect: 'none',
+                            }}
+                          >
+                            <DragHandleDots />
                           </div>
                         </td>
 
@@ -533,12 +595,6 @@ const td = (isLast: boolean): React.CSSProperties => ({
   verticalAlign: 'middle', padding: '2px 4px',
 })
 
-const iconBtn: React.CSSProperties = {
-  background: 'none', border: 'none', cursor: 'pointer',
-  color: 'var(--text-muted)', fontSize: 10, padding: '1px 3px',
-  lineHeight: 1, borderRadius: 4,
-}
-
 function toolIconBtn(color: string): React.CSSProperties {
   return {
     width: 32, height: 32, padding: 0, flexShrink: 0,
@@ -547,4 +603,17 @@ function toolIconBtn(color: string): React.CSSProperties {
     background: `${color}15`, color,
     cursor: 'pointer', transition: 'background 0.15s, border-color 0.15s',
   }
+}
+
+function DragHandleDots() {
+  return (
+    <svg width={10} height={16} viewBox="0 0 10 16" fill="currentColor" aria-hidden>
+      <circle cx="3" cy="3" r="1.3" />
+      <circle cx="7" cy="3" r="1.3" />
+      <circle cx="3" cy="8" r="1.3" />
+      <circle cx="7" cy="8" r="1.3" />
+      <circle cx="3" cy="13" r="1.3" />
+      <circle cx="7" cy="13" r="1.3" />
+    </svg>
+  )
 }
