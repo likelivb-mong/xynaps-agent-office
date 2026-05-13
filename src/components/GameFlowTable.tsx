@@ -177,8 +177,8 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
     e.dataTransfer.setData('text/plain', `${secId}:${stepId}`)
     setDraggingStep({ secId, stepId })
   }
-  function handleRowDragOver(e: React.DragEvent, secId: string, stepId: string) {
-    if (!draggingStep || draggingStep.secId !== secId) return // 같은 섹션 내에서만 허용
+  function handleRowDragOver(e: React.DragEvent, _secId: string, stepId: string) {
+    if (!draggingStep) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     const rect = e.currentTarget.getBoundingClientRect()
@@ -187,20 +187,71 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
       setDragOver({ stepId, pos })
     }
   }
-  function handleRowDrop(e: React.DragEvent, secId: string, targetStepId: string) {
-    if (!draggingStep || draggingStep.secId !== secId) return
+  function handleRowDrop(e: React.DragEvent, targetSecId: string, targetStepId: string) {
+    if (!draggingStep) return
     e.preventDefault()
-    const sec = sheet.sections.find(s => s.id === secId)
-    if (!sec) return
-    const fromIdx = sec.steps.findIndex(st => st.id === draggingStep.stepId)
-    let toIdx = sec.steps.findIndex(st => st.id === targetStepId)
-    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) { clearDrag(); return }
-    if (dragOver?.pos === 'after') toIdx++
-    const steps = [...sec.steps]
-    const [moved] = steps.splice(fromIdx, 1)
-    if (fromIdx < toIdx) toIdx-- // 제거 후 인덱스 보정
-    steps.splice(toIdx, 0, moved)
-    updateSection(secId, { steps: renumberSteps(steps) })
+    const srcSec = sheet.sections.find(s => s.id === draggingStep.secId)
+    const tgtSec = sheet.sections.find(s => s.id === targetSecId)
+    if (!srcSec || !tgtSec) { clearDrag(); return }
+    const fromIdx = srcSec.steps.findIndex(st => st.id === draggingStep.stepId)
+    if (fromIdx < 0) { clearDrag(); return }
+    const sameSection = draggingStep.secId === targetSecId
+
+    if (sameSection) {
+      let toIdx = tgtSec.steps.findIndex(st => st.id === targetStepId)
+      if (toIdx < 0 || fromIdx === toIdx) { clearDrag(); return }
+      if (dragOver?.pos === 'after') toIdx++
+      const steps = [...tgtSec.steps]
+      const [moved] = steps.splice(fromIdx, 1)
+      if (fromIdx < toIdx) toIdx--
+      steps.splice(toIdx, 0, moved)
+      updateSection(targetSecId, { steps: renumberSteps(steps) })
+    } else {
+      // 섹션 간 이동: 한 번의 onChange로 두 섹션 모두 업데이트
+      const moved = srcSec.steps[fromIdx]
+      const srcSteps = srcSec.steps.filter(st => st.id !== draggingStep.stepId)
+      let toIdx = tgtSec.steps.findIndex(st => st.id === targetStepId)
+      if (toIdx < 0) toIdx = tgtSec.steps.length
+      else if (dragOver?.pos === 'after') toIdx++
+      const tgtSteps = [...tgtSec.steps]
+      tgtSteps.splice(toIdx, 0, moved)
+      onChange({
+        ...sheet,
+        sections: sheet.sections.map(s => {
+          if (s.id === draggingStep.secId) return { ...s, steps: renumberSteps(srcSteps) }
+          if (s.id === targetSecId) return { ...s, steps: renumberSteps(tgtSteps) }
+          return s
+        }),
+      })
+    }
+    clearDrag()
+  }
+  // 빈 섹션이나 섹션 헤더로 드래그된 경우의 드롭 처리 — 섹션 끝에 붙임
+  function handleSectionDragOver(e: React.DragEvent) {
+    if (!draggingStep) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+  function handleSectionDrop(e: React.DragEvent, targetSecId: string) {
+    if (!draggingStep) return
+    e.preventDefault()
+    e.stopPropagation()
+    const srcSec = sheet.sections.find(s => s.id === draggingStep.secId)
+    const tgtSec = sheet.sections.find(s => s.id === targetSecId)
+    if (!srcSec || !tgtSec) { clearDrag(); return }
+    const moved = srcSec.steps.find(st => st.id === draggingStep.stepId)
+    if (!moved) { clearDrag(); return }
+    if (draggingStep.secId === targetSecId) { clearDrag(); return }
+    const srcSteps = srcSec.steps.filter(st => st.id !== draggingStep.stepId)
+    const tgtSteps = [...tgtSec.steps, moved]
+    onChange({
+      ...sheet,
+      sections: sheet.sections.map(s => {
+        if (s.id === draggingStep.secId) return { ...s, steps: renumberSteps(srcSteps) }
+        if (s.id === targetSecId) return { ...s, steps: renumberSteps(tgtSteps) }
+        return s
+      }),
+    })
     clearDrag()
   }
   function clearDrag() {
@@ -550,14 +601,21 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
 
                   {/* 빈 섹션 */}
                   {!isCollapsed && section.steps.length === 0 && (
-                    <tr key={`empty-${section.id}`}>
+                    <tr key={`empty-${section.id}`}
+                      onDragOver={handleSectionDragOver}
+                      onDrop={(e) => handleSectionDrop(e, section.id)}>
                       <td colSpan={10} style={{
                         padding: '20px', textAlign: 'center',
                         color: 'var(--text-muted)', fontSize: 12,
                         borderBottom: '1px solid var(--border)',
                         fontStyle: 'italic', letterSpacing: 0.2,
+                        background: draggingStep && draggingStep.secId !== section.id ? 'rgba(255,255,255,0.04)' : undefined,
+                        outline: draggingStep && draggingStep.secId !== section.id ? '1px dashed var(--accent)' : undefined,
+                        outlineOffset: -4,
                       }}>
-                        스텝이 없습니다 — "+ 행" 버튼으로 추가하세요
+                        {draggingStep && draggingStep.secId !== section.id
+                          ? '여기로 끌어와서 이 섹션에 추가'
+                          : '스텝이 없습니다 — "+ 행" 버튼으로 추가하세요'}
                       </td>
                     </tr>
                   )}
