@@ -9,6 +9,7 @@ import { useCostConfirm } from '../components/ui/CostConfirmModal'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, rerunSingleAgent, isSingleAgentRunning, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
 import { GameFlowTable } from '../components/GameFlowTable'
+import { GameFlowCards } from '../components/GameFlowCards'
 import { GameFlowMap } from '../components/GameFlowMap'
 import AudioScriptTable from '../components/AudioScriptTable'
 import { MetaStudio } from '../components/MetaStudio'
@@ -241,7 +242,7 @@ export function ProjectPage() {
   const [finalEditSummary, setFinalEditSummary] = useState('')
   const [finalEditDetail, setFinalEditDetail] = useState('')
   const [activeTab, setActiveTab] = useState<'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop'>('reports')
-  const [gameflowView, setGameflowView] = useState<'table' | 'map' | 'user' | 'script'>('table')
+  const [gameflowView, setGameflowView] = useState<'table' | 'cards' | 'map' | 'user' | 'script'>('table')
   const [generatingGameFlow, setGeneratingGameFlow] = useState(false)
   const [gameFlowElapsed, setGameFlowElapsed] = useState(0)
   const [gameFlowError, setGameFlowError] = useState<string | null>(null)
@@ -1973,11 +1974,12 @@ export function ProjectPage() {
                     <div style={{ display: 'flex', gap: 6, marginBottom: 16, alignItems: 'center', overflow: 'visible', paddingBottom: 4 }}>
                       {[
                         { key: 'table', label: 'Step Table' },
+                        { key: 'cards', label: 'Game Step' },
                         { key: 'map', label: 'Pass Map' },
                         { key: 'user', label: 'User Flow' },
                         ...(hasSurround ? [{ key: 'script', label: '🎧 Script' }] : []),
                       ].map(v => (
-                        <button key={v.key} onClick={() => setGameflowView(v.key as 'table' | 'map' | 'user' | 'script')} style={{
+                        <button key={v.key} onClick={() => setGameflowView(v.key as 'table' | 'cards' | 'map' | 'user' | 'script')} style={{
                           padding: '6px 14px', borderRadius: 8, border: 'none',
                           background: gameflowView === v.key ? (v.key === 'script' ? '#8b5cf6' : 'var(--accent)') : 'var(--bg-card)',
                           color: gameflowView === v.key ? (v.key === 'script' ? '#fff' : 'var(--accent-fg)') : v.key === 'script' ? '#a78bfa' : 'var(--text-muted)',
@@ -1987,8 +1989,8 @@ export function ProjectPage() {
                         }}>{v.label}</button>
                       ))}
 
-                      {/* 테이블 뷰: 보고서 반영 / 맵 뷰: 테이블 반영 */}
-                      {gameflowView === 'table' ? (
+                      {/* 테이블/카드 뷰: 보고서 반영 / 맵 뷰: 테이블 반영 */}
+                      {gameflowView === 'table' || gameflowView === 'cards' ? (
                         <div style={{ marginLeft: 'auto', position: 'relative', display: 'flex', alignItems: 'center', overflow: 'visible', minHeight: 36 }}>
                           <button onClick={generateGameFlow} disabled={generatingGameFlow} title={syncTitle} style={{
                             width: 32, height: 32, padding: 0,
@@ -2062,6 +2064,12 @@ export function ProjectPage() {
 
                 {gameflowView === 'table' && (
                   <GameFlowTable
+                    sheet={activeVersion.gameFlow}
+                    onChange={handleGameFlowChange}
+                  />
+                )}
+                {gameflowView === 'cards' && (
+                  <GameFlowCards
                     sheet={activeVersion.gameFlow}
                     onChange={handleGameFlowChange}
                   />
