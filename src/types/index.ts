@@ -142,6 +142,7 @@ export interface ProjectVersion {
   createdAt: string
   agentReports: AgentReport[]
   finalReport?: FinalReport
+  storyBeats?: StoryBeatsSheet
   gameFlow?: GameFlowSheet
   audioScript?: AudioScript
   workshopSessions?: WorkshopSession[]
@@ -285,6 +286,21 @@ export interface GameFlowSheet {
   sections: GameFlowSection[]
   generatedAt: string
   userFlow?: UserFlowConfig
+}
+
+// 게임 플로우 전 단계 — 시드 필드 3막 구조 기반 스토리 비트 시트 (초안)
+export interface StoryBeat {
+  id: string
+  room: string        // 공간 이름 (예: "ROOM 1 — 출입금지실 앞") — 연속 동일 공간은 셀 병합 표시
+  roomTag?: string    // 막 라벨 (예: "1막 · 셋업")
+  beat: string        // 비트 제목 (예: "셋업 (설정)")
+  beatSub?: string    // 비트 부제 (예: "책상방 · 완전 어둠 오프닝")
+  content: string     // 비트 내용
+}
+export interface StoryBeatsSheet {
+  beats: StoryBeat[]
+  generatedAt: string
+  updatedAt?: string  // 수동 편집 시각 — Step Table 재반영 필요 여부 판단용
 }
 
 export type AudioChannel = 'L' | 'R' | 'C' | 'L+R' | 'SFX' | '전환'

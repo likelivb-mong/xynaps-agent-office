@@ -1,4 +1,4 @@
-import type { Agent, SkillFile, AgentReport, AgentId, CrimeConfig, GameFlowSheet, GameFlowSection, GameStep, ProblemType, ChatMessage, GameSystemType, BriefingData, CharacterRole, StoryStageKey, WorkshopSession } from '../types'
+import type { Agent, SkillFile, AgentReport, AgentId, CrimeConfig, GameFlowSheet, GameFlowSection, GameStep, ProblemType, ChatMessage, GameSystemType, BriefingData, CharacterRole, StoryStageKey, WorkshopSession, StoryBeatsSheet, StoryBeat } from '../types'
 import { AGENTS } from '../data/agents'
 import { XKIT_DEFINITION } from '../data/questData'
 
@@ -2047,6 +2047,218 @@ ${reportsText}
   } catch (error) {
     onProgress?.('done')
     throw toReadableApiError(error, '게임 플로우 생성에 실패했습니다.')
+  }
+}
+
+// ── 스토리 비트 시트 (게임 플로우 전 단계 초안) ──────────────────────────────
+// 시드 필드 3막 구조 8비트: 셋업 → 암시적인 사건 → 플롯 포인트 1 → 첫 번째 궁지
+// → 미드 포인트 → 두 번째 궁지 → 플롯 포인트 2 → 해결
+const STORY_BEAT_NAMES = [
+  { beat: '셋업 (설정)', act: '1막 · 셋업' },
+  { beat: '암시적인 사건', act: '1막 · 도입이벤트' },
+  { beat: '플롯 포인트 1', act: '2막 전반부 (2-1)' },
+  { beat: '첫 번째 궁지', act: '2막 전반부 (2-1)' },
+  { beat: '미드 포인트 (정중앙점)', act: '2막 후반부 (2-2) · 미드포인트' },
+  { beat: '두 번째 궁지', act: '2막 후반부 (2-2)' },
+  { beat: '플롯 포인트 2', act: '2막 후반부 · 3막' },
+  { beat: '해결', act: '3막' },
+]
+
+function normalizeStoryBeats(parsed: { beats?: Array<Partial<StoryBeat>> }): StoryBeatsSheet {
+  const beats: StoryBeat[] = (parsed.beats || []).map((b, i) => ({
+    id: crypto.randomUUID(),
+    room: b.room || `ROOM ${i + 1}`,
+    roomTag: b.roomTag || STORY_BEAT_NAMES[i]?.act || '',
+    beat: b.beat || STORY_BEAT_NAMES[i]?.beat || `비트 ${i + 1}`,
+    beatSub: b.beatSub || '',
+    content: b.content || '',
+  }))
+  return { beats, generatedAt: new Date().toISOString() }
+}
+
+export async function compileStoryBeats(
+  projectTheme: string,
+  crimeConfig: CrimeConfig | undefined,
+  agentReports: AgentReport[],
+  attachments?: SkillFile[],
+): Promise<StoryBeatsSheet> {
+  const reportsText = agentReports.map(r =>
+    `### ${r.agentName} (${r.agentId})\n${r.summary || r.detail}`
+  ).join('\n\n')
+
+  const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
+  const attachmentContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
+
+  const systemPrompt = `방탈출 스토리 구조 전문가. 시드 필드 3막 구조 기반 비트 시트 작성. 유효한 JSON만 반환, 다른 텍스트 없음.`
+
+  const beatGuide = STORY_BEAT_NAMES.map((b, i) => `${i + 1}. ${b.beat} [${b.act}]`).join('\n')
+
+  const userPrompt = `테마: ${projectTheme}
+${crimeContext ? crimeContext.split('\n').slice(0, 10).join('\n') : ''}
+
+에이전트 요약:
+${reportsText}
+
+시드 필드 3막 구조의 8개 비트로 스토리 초안을 작성하세요. 비트 순서 고정:
+${beatGuide}
+
+각 비트를 게임의 물리 공간(룸)에 매핑하세요. 연속 비트가 같은 공간에서 일어나면 room 값을 동일하게 쓰세요 (예: ROOM 1에서 셋업+암시적인 사건).
+- room: "ROOM N — 공간이름" 형식
+- beatSub: 비트의 핵심 소재 한 줄 (예: "책상방 · 완전 어둠 오프닝")
+- content: 플레이어가 이 비트에서 겪는 사건·발견·감정을 3~5문장으로. 핵심 단서/연출/대사 포함.
+
+반환 형식 (JSON만):
+{
+  "beats": [
+    { "room": "ROOM 1 — 공간이름", "roomTag": "1막 · 셋업", "beat": "셋업 (설정)", "beatSub": "한 줄 부제", "content": "내용" }
+  ]
+}`
+
+  const userContent: unknown[] = [
+    ...(attachmentContent.length > 0 ? attachmentContent : []),
+    { type: 'text', text: userPrompt }
+  ]
+
+  try {
+    const thinkingFinal = resolveThinking('deep')
+    const response = await fetchAnthropicWithTimeout({
+      model: resolveModel('deep'),
+      max_tokens: resolveMaxTokens('deep'),
+      ...(thinkingFinal ? { thinking: thinkingFinal } : {}),
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    }, { timeoutMs: 720000 })
+
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error?.message || 'API 오류')
+    const text: string = extractText(data)
+
+    let parsed: { beats?: Array<Partial<StoryBeat>> }
+    try {
+      parsed = parseModelJsonResponse(text) as { beats?: Array<Partial<StoryBeat>> }
+    } catch {
+      parsed = await repairModelJsonResponse(text, `{
+  "beats": [
+    { "room": "ROOM 1 — 공간이름", "roomTag": "1막 · 셋업", "beat": "셋업 (설정)", "beatSub": "부제", "content": "내용" }
+  ]
+}`) as { beats?: Array<Partial<StoryBeat>> }
+    }
+
+    return normalizeStoryBeats(parsed)
+  } catch (error) {
+    throw toReadableApiError(error, '스토리 비트 시트 생성에 실패했습니다.')
+  }
+}
+
+// 비트 시트 → 게임 플로우 시트 변환. 비트의 공간·사건 구조를 따라 섹션/스텝을 구성한다.
+export async function compileGameFlowFromBeats(
+  projectTheme: string,
+  crimeConfig: CrimeConfig | undefined,
+  storyBeats: StoryBeatsSheet,
+  existingSheet?: GameFlowSheet,
+): Promise<GameFlowSheet> {
+  const beatsText = storyBeats.beats.map((b, i) =>
+    `${i + 1}. [${b.room}] ${b.beat}${b.beatSub ? ` — ${b.beatSub}` : ''}\n${b.content}`
+  ).join('\n\n')
+
+  const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
+
+  const systemPrompt = `방탈출 게임 플로우 시트 전문가. 유효한 JSON만 반환, 다른 텍스트 없음.
+Xkit=디지털파일장치 Key=물리잠금 Dev=전자센서/트리거
+문제유형: 평면(텍스트/영상/x-kit/UV) 입체(물품/장치) 공간(배치/협동) 감각`
+
+  const userPrompt = `테마: ${projectTheme}
+${crimeContext ? crimeContext.split('\n').slice(0, 10).join('\n') : ''}
+
+스토리 비트 시트 (시드 필드 3막 구조, 이 구조와 내용을 충실히 따를 것):
+${beatsText}
+
+위 비트 시트를 게임 플로우 JSON으로 변환 (30스텝 이내):
+- 비트의 공간(room)별로 섹션 구성, 비트 순서 = 플레이어 진행순
+- 각 비트의 사건·단서를 구체적 퍼즐 스텝으로 분해
+- story: 핵심행동 1문장
+
+반환 형식 (JSON만, 다른 텍스트 없이):
+{
+  "sections": [
+    {
+      "title": "섹션명 (예: 서재 입장)",
+      "steps": [
+        {
+          "step": 1,
+          "clue": "단서/소품 이름",
+          "story": "이 단계의 게임 진행 스토리와 풀이 흐름을 1~2문장으로 요약",
+          "input": "플레이어 입력값 또는 행동",
+          "xkit": false,
+          "key": false,
+          "dev": false,
+          "output": "결과 / 열리는 것 / 다음 단계",
+          "auto": false,
+          "problemType": "평면"
+        }
+      ]
+    }
+  ]
+}`
+
+  try {
+    const thinkingFinal = resolveThinking('deep')
+    const response = await fetchAnthropicWithTimeout({
+      model: resolveModel('deep'),
+      max_tokens: resolveMaxTokens('deep'),
+      ...(thinkingFinal ? { thinking: thinkingFinal } : {}),
+      system: systemPrompt,
+      messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }],
+    }, { timeoutMs: 720000 })
+
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error?.message || 'API 오류')
+    const text: string = extractText(data)
+
+    let parsed: { sections?: Array<{ title?: string; steps?: unknown[] }> }
+    try {
+      parsed = parseModelJsonResponse(text) as { sections?: Array<{ title?: string; steps?: unknown[] }> }
+    } catch {
+      parsed = await repairModelJsonResponse(text, `{
+  "sections": [
+    {
+      "title": "섹션명",
+      "steps": [
+        { "step": 1, "clue": "단서", "story": "요약", "input": "행동", "xkit": false, "key": false, "dev": false, "output": "결과", "auto": false, "problemType": "평면" }
+      ]
+    }
+  ]
+}`) as { sections?: Array<{ title?: string; steps?: unknown[] }> }
+    }
+
+    const sections: GameFlowSection[] = (parsed.sections || []).map((sec: { title?: string; steps?: unknown[] }) => {
+      const safeSteps: Partial<GameStep>[] = Array.isArray(sec.steps)
+        ? sec.steps as Partial<GameStep>[]
+        : []
+      return {
+        id: crypto.randomUUID(),
+        title: sec.title || '미정',
+        steps: safeSteps.map((s, i) => ({
+          id: crypto.randomUUID(),
+          step: s.step ?? i + 1,
+          clue: s.clue || '',
+          story: s.story || '',
+          input: s.input || '',
+          xkit: Boolean(s.xkit),
+          key: Boolean(s.key),
+          dev: Boolean(s.dev),
+          output: s.output || '',
+          auto: Boolean(s.auto),
+          problemType: (s.problemType || '') as ProblemType,
+          note: s.note,
+        })),
+      }
+    })
+
+    // 기존 시트의 맵 배치(userFlow)는 보존
+    return { sections, generatedAt: new Date().toISOString(), userFlow: existingSheet?.userFlow }
+  } catch (error) {
+    throw toReadableApiError(error, '비트 시트의 게임 플로우 변환에 실패했습니다.')
   }
 }
 

@@ -1,21 +1,22 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase, onSaveStatus, getSaveStatus, type SaveStatus } from '../lib/storage'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionStoryBeats, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase, onSaveStatus, getSaveStatus, type SaveStatus } from '../lib/storage'
 import { safeGetItem, safeSetItem } from '../lib/storageCompression'
 import { GroupBriefingChat } from '../components/briefing/GroupBriefingChat'
-import { compileGameFlow, compileAudioScript } from '../lib/api'
+import { compileGameFlow, compileStoryBeats, compileGameFlowFromBeats, compileAudioScript } from '../lib/api'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, rerunSingleAgent, isSingleAgentRunning, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
 import { GameFlowTable } from '../components/GameFlowTable'
 import { GameFlowCards } from '../components/GameFlowCards'
+import { StoryBeatsTable } from '../components/StoryBeatsTable'
 import { GameFlowMap } from '../components/GameFlowMap'
 import AudioScriptTable from '../components/AudioScriptTable'
 import { MetaStudio } from '../components/MetaStudio'
 import { WorkshopTab } from '../components/workshop/WorkshopTab'
 import { AGENTS } from '../data/agents'
-import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, AudioScript, ChatMessage, DetailVersion } from '../types'
+import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, StoryBeatsSheet, AudioScript, ChatMessage, DetailVersion } from '../types'
 
 // ─── 회의록 카드 ─────────────────────────────────────────────────────────────
 function parseMinutesSections(text: string): { title: string; body: string }[] {
@@ -242,10 +243,13 @@ export function ProjectPage() {
   const [finalEditSummary, setFinalEditSummary] = useState('')
   const [finalEditDetail, setFinalEditDetail] = useState('')
   const [activeTab, setActiveTab] = useState<'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop'>('reports')
-  const [gameflowView, setGameflowView] = useState<'table' | 'cards' | 'map' | 'user' | 'script'>('table')
+  const [gameflowView, setGameflowView] = useState<'beats' | 'table' | 'cards' | 'map' | 'user' | 'script'>('table')
   const [generatingGameFlow, setGeneratingGameFlow] = useState(false)
   const [gameFlowElapsed, setGameFlowElapsed] = useState(0)
   const [gameFlowError, setGameFlowError] = useState<string | null>(null)
+  const [generatingBeats, setGeneratingBeats] = useState(false)
+  const [applyingBeats, setApplyingBeats] = useState(false)
+  const [beatsError, setBeatsError] = useState<string | null>(null)
   const [generatingAudioScript, setGeneratingAudioScript] = useState(false)
   const [audioScriptError, setAudioScriptError] = useState<string | null>(null)
   const [gameFlowSyncedAt, setGameFlowSyncedAt] = useState<string | null>(null)
@@ -325,6 +329,14 @@ export function ProjectPage() {
     setWorkspaceHistory(loadWorkspaceHistory(activeTab))
     setShowWorkspaceHistory(false)
   }, [activeTab, project?.id, activeVersion?.id])
+
+  // 비트 시트만 있고 Step Table이 아직 없으면 게임플로우 탭 진입 시 초안(Beat Sheet) 뷰부터 보여준다
+  useEffect(() => {
+    if (activeTab === 'gameflow' && activeVersion?.storyBeats && !activeVersion?.gameFlow) {
+      setGameflowView('beats')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
 
   useEffect(() => {
     if (!project) return
@@ -543,6 +555,69 @@ export function ProjectPage() {
     if (!project || !activeVersion) return
     updateVersionGameFlow(project.id, activeVersion.id, sheet)
     reload()
+  }
+
+  function handleStoryBeatsChange(sheet: StoryBeatsSheet) {
+    if (!project || !activeVersion) return
+    updateVersionStoryBeats(project.id, activeVersion.id, sheet)
+    reload()
+  }
+
+  // 보고서 → 비트 시트(초안) 생성
+  function generateStoryBeats() {
+    if (!project || !activeVersion) return
+    requireConfirm('game-flow', () => _doGenerateStoryBeats())
+  }
+  async function _doGenerateStoryBeats() {
+    if (!project || !activeVersion) return
+    setGeneratingBeats(true)
+    setBeatsError(null)
+    try {
+      const resolvedReports = activeVersion.agentReports.map(r => {
+        const activeVer = r.detailVersions?.find(v => v.id === r.activeVersionId)
+        return activeVer ? { ...r, summary: activeVer.summary, detail: activeVer.detail } : r
+      })
+      const sheet = await compileStoryBeats(
+        project.theme,
+        project.crimeConfig,
+        resolvedReports,
+        project.attachments
+      )
+      updateVersionStoryBeats(project.id, activeVersion.id, sheet)
+      setGameflowView('beats')
+      reload()
+    } catch (e) {
+      setBeatsError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setGeneratingBeats(false)
+    }
+  }
+
+  // 비트 시트 → Step Table 반영 (다음 단계 자동 반영)
+  function applyBeatsToTable() {
+    if (!project || !activeVersion?.storyBeats) return
+    requireConfirm('game-flow', () => _doApplyBeatsToTable())
+  }
+  async function _doApplyBeatsToTable() {
+    if (!project || !activeVersion?.storyBeats) return
+    setApplyingBeats(true)
+    setBeatsError(null)
+    try {
+      const sheet = await compileGameFlowFromBeats(
+        project.theme,
+        project.crimeConfig,
+        activeVersion.storyBeats,
+        activeVersion.gameFlow
+      )
+      updateVersionGameFlow(project.id, activeVersion.id, sheet)
+      setGameFlowSyncedAt(new Date().toISOString())
+      setGameflowView('table')
+      reload()
+    } catch (e) {
+      setBeatsError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setApplyingBeats(false)
+    }
   }
 
   function handleAudioScriptChange(script: AudioScript) {
@@ -1909,7 +1984,7 @@ export function ProjectPage() {
         {/* 게임 플로우 시트 탭 */}
         {!running && activeTab === 'gameflow' && hasCompletedReports && (
           <div>
-            {activeVersion?.gameFlow ? (
+            {(activeVersion?.gameFlow || activeVersion?.storyBeats) ? (
               <>
                 {/* 에러 배너 */}
                 {gameFlowError && (
@@ -1973,24 +2048,79 @@ export function ProjectPage() {
                   return (
                     <div style={{ display: 'flex', gap: 6, marginBottom: 16, alignItems: 'center', overflow: 'visible', paddingBottom: 4 }}>
                       {[
+                        { key: 'beats', label: 'Beat Sheet' },
                         { key: 'table', label: 'Step Table' },
                         { key: 'cards', label: 'Game Step' },
                         { key: 'map', label: 'Pass Map' },
                         { key: 'user', label: 'User Flow' },
                         ...(hasSurround ? [{ key: 'script', label: '🎧 Script' }] : []),
-                      ].map(v => (
-                        <button key={v.key} onClick={() => setGameflowView(v.key as 'table' | 'cards' | 'map' | 'user' | 'script')} style={{
-                          padding: '6px 14px', borderRadius: 8, border: 'none',
-                          background: gameflowView === v.key ? (v.key === 'script' ? '#8b5cf6' : 'var(--accent)') : 'var(--bg-card)',
-                          color: gameflowView === v.key ? (v.key === 'script' ? '#fff' : 'var(--accent-fg)') : v.key === 'script' ? '#a78bfa' : 'var(--text-muted)',
-                          fontSize: 12, fontWeight: gameflowView === v.key ? 700 : 400,
-                          cursor: 'pointer', transition: 'all 0.15s',
-                          outline: v.key === 'script' && gameflowView !== 'script' ? '1px solid rgba(167,139,250,0.3)' : 'none',
-                        }}>{v.label}</button>
+                      ].map((v, vi) => (
+                        <Fragment key={v.key}>
+                          {/* 파이프라인 단계 구분자 */}
+                          {vi > 0 && (
+                            <span style={{ color: 'var(--text-muted)', opacity: 0.35, fontSize: 12, userSelect: 'none', flexShrink: 0 }}>›</span>
+                          )}
+                          <button onClick={() => setGameflowView(v.key as 'beats' | 'table' | 'cards' | 'map' | 'user' | 'script')} style={{
+                            padding: '6px 14px', borderRadius: 8, border: 'none',
+                            background: gameflowView === v.key ? (v.key === 'script' ? '#8b5cf6' : 'var(--accent)') : 'var(--bg-card)',
+                            color: gameflowView === v.key ? (v.key === 'script' ? '#fff' : 'var(--accent-fg)') : v.key === 'script' ? '#a78bfa' : 'var(--text-muted)',
+                            fontSize: 12, fontWeight: gameflowView === v.key ? 700 : 400,
+                            cursor: 'pointer', transition: 'all 0.15s',
+                            outline: v.key === 'script' && gameflowView !== 'script' ? '1px solid rgba(167,139,250,0.3)' : 'none',
+                          }}>{v.label}</button>
+                        </Fragment>
                       ))}
 
-                      {/* 테이블/카드 뷰: 보고서 반영 / 맵 뷰: 테이블 반영 */}
-                      {gameflowView === 'table' || gameflowView === 'cards' ? (
+                      {/* 비트 뷰: 보고서 반영 + Step Table 반영 / 테이블·카드 뷰: 보고서 반영 / 맵 뷰: 테이블 반영 */}
+                      {gameflowView === 'beats' ? (
+                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, minHeight: 36 }}>
+                          {beatsError && (
+                            <span style={{ fontSize: 11.5, color: '#f87171', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={beatsError}>
+                              {beatsError}
+                            </span>
+                          )}
+                          <button onClick={generateStoryBeats} disabled={generatingBeats || applyingBeats}
+                            title={activeVersion?.storyBeats ? '보고서 재반영 — 비트 시트 초안을 다시 생성합니다' : '보고서 반영하기 — 비트 시트 초안 생성'}
+                            style={{
+                              width: 32, height: 32, padding: 0,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              borderRadius: 8, border: '1px solid var(--border)',
+                              background: 'transparent', color: 'var(--text-muted)',
+                              cursor: generatingBeats || applyingBeats ? 'not-allowed' : 'pointer',
+                              opacity: generatingBeats || applyingBeats ? 0.6 : 1,
+                              transition: 'background 0.15s, border-color 0.15s',
+                            }}>
+                            {generatingBeats ? <Spinner size={13} /> : <RefreshIcon width={15} height={15} />}
+                          </button>
+                          {(() => {
+                            const beats = activeVersion?.storyBeats
+                            const beatsStale = Boolean(
+                              beats && activeVersion?.gameFlow &&
+                              (beats.updatedAt ?? beats.generatedAt) > activeVersion.gameFlow.generatedAt
+                            )
+                            return (
+                              <button onClick={applyBeatsToTable}
+                                disabled={!beats || generatingBeats || applyingBeats}
+                                title={beatsStale ? '비트 시트가 수정되었습니다 — Step Table에 재반영하세요' : '비트 시트를 Step Table로 변환해 다음 단계에 반영합니다'}
+                                style={{
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                  height: 32, padding: '0 12px',
+                                  borderRadius: 8,
+                                  border: beatsStale ? '1px solid #f59e0b66' : '1px solid var(--accent)55',
+                                  background: beatsStale ? '#3a2a0055' : 'var(--accent-dim)',
+                                  color: beatsStale ? '#fbbf24' : 'var(--accent)',
+                                  cursor: !beats || generatingBeats || applyingBeats ? 'not-allowed' : 'pointer',
+                                  opacity: !beats || generatingBeats ? 0.5 : 1,
+                                  transition: 'background 0.15s',
+                                  whiteSpace: 'nowrap', fontSize: 12, fontWeight: 700,
+                                }}>
+                                {applyingBeats ? <Spinner size={13} /> : <DownloadIcon width={15} height={15} />}
+                                <span>Step Table 반영</span>
+                              </button>
+                            )
+                          })()}
+                        </div>
+                      ) : gameflowView === 'table' || gameflowView === 'cards' ? (
                         <div style={{ marginLeft: 'auto', position: 'relative', display: 'flex', alignItems: 'center', overflow: 'visible', minHeight: 36 }}>
                           <button onClick={generateGameFlow} disabled={generatingGameFlow} title={syncTitle} style={{
                             width: 32, height: 32, padding: 0,
@@ -2062,19 +2192,75 @@ export function ProjectPage() {
                   )
                 })()}
 
-                {gameflowView === 'table' && (
+                {gameflowView === 'beats' && (
+                  activeVersion.storyBeats ? (
+                    <StoryBeatsTable
+                      sheet={activeVersion.storyBeats}
+                      onChange={handleStoryBeatsChange}
+                    />
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '48px 24px', background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 32, marginBottom: 14, opacity: 0.25 }}>◇</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>비트 시트 초안 미생성</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 20, maxWidth: 420, margin: '0 auto 20px' }}>
+                        에이전트 보고서를 시드 필드 3막 구조의 스토리 비트 시트로 정리합니다.
+                        초안을 다듬은 뒤 Step Table에 반영하세요.
+                      </div>
+                      <button onClick={generateStoryBeats} disabled={generatingBeats} style={{
+                        padding: '10px 26px', borderRadius: 10, border: 'none',
+                        background: 'var(--accent)', color: 'var(--accent-fg)',
+                        fontSize: 13.5, fontWeight: 700, cursor: generatingBeats ? 'not-allowed' : 'pointer',
+                        opacity: generatingBeats ? 0.6 : 1,
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                      }}>
+                        {generatingBeats && <Spinner size={13} color="var(--accent-fg)" />}
+                        {generatingBeats ? '초안 생성 중...' : '보고서 반영하기'}
+                      </button>
+                    </div>
+                  )
+                )}
+                {/* 비트 시트만 있고 Step Table이 아직 없는 경우의 안내 */}
+                {gameflowView !== 'beats' && gameflowView !== 'script' && !activeVersion.gameFlow && (
+                  <div style={{ textAlign: 'center', padding: '48px 24px', background: 'var(--bg-card)', borderRadius: 16, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 32, marginBottom: 14, opacity: 0.25 }}>◈</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Step Table 미생성</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 20, maxWidth: 420, margin: '0 auto 20px' }}>
+                      Beat Sheet 초안을 다듬은 뒤 "Step Table 반영"을 누르거나, 보고서에서 바로 생성할 수 있습니다.
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                      <button onClick={() => setGameflowView('beats')} style={{
+                        padding: '9px 20px', borderRadius: 10, border: '1px solid var(--accent)55',
+                        background: 'var(--accent-dim)', color: 'var(--accent)',
+                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                      }}>
+                        Beat Sheet 열기
+                      </button>
+                      <button onClick={generateGameFlow} disabled={generatingGameFlow} style={{
+                        padding: '9px 20px', borderRadius: 10, border: '1px solid var(--border)',
+                        background: 'transparent', color: 'var(--text-secondary)',
+                        fontSize: 13, fontWeight: 600, cursor: generatingGameFlow ? 'not-allowed' : 'pointer',
+                        opacity: generatingGameFlow ? 0.6 : 1,
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                      }}>
+                        {generatingGameFlow && <Spinner size={12} />}
+                        보고서에서 바로 생성
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {gameflowView === 'table' && activeVersion.gameFlow && (
                   <GameFlowTable
                     sheet={activeVersion.gameFlow}
                     onChange={handleGameFlowChange}
                   />
                 )}
-                {gameflowView === 'cards' && (
+                {gameflowView === 'cards' && activeVersion.gameFlow && (
                   <GameFlowCards
                     sheet={activeVersion.gameFlow}
                     onChange={handleGameFlowChange}
                   />
                 )}
-                {gameflowView === 'map' && (
+                {gameflowView === 'map' && activeVersion.gameFlow && (
                   <GameFlowMap
                     sheet={activeVersion.gameFlow}
                     floorPlanImage={project.attachments?.find(a => a.type === 'image') ?? null}
@@ -2083,7 +2269,7 @@ export function ProjectPage() {
                     projectName={project.name}
                   />
                 )}
-                {gameflowView === 'user' && (
+                {gameflowView === 'user' && activeVersion.gameFlow && (
                   <GameFlowMap
                     sheet={activeVersion.gameFlow}
                     floorPlanImage={project.attachments?.find(a => a.type === 'image') ?? null}
@@ -2183,13 +2369,36 @@ export function ProjectPage() {
                         )}
                       </div>
                     )}
-                    <button onClick={generateGameFlow} style={{
-                      padding: '12px 32px', borderRadius: 12, border: 'none',
-                      background: 'var(--accent)', color: 'var(--accent-fg)',
-                      fontSize: 15, fontWeight: 700, cursor: 'pointer',
-                    }}>
-                      에이전트 보고서 반영하기
-                    </button>
+                    <div style={{ display: 'flex', gap: 12, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button onClick={generateStoryBeats} disabled={generatingBeats} style={{
+                        padding: '12px 28px', borderRadius: 12, border: '1px solid var(--accent)55',
+                        background: 'var(--accent-dim)', color: 'var(--accent)',
+                        fontSize: 15, fontWeight: 700, cursor: generatingBeats ? 'not-allowed' : 'pointer',
+                        opacity: generatingBeats ? 0.6 : 1,
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                      }}>
+                        {generatingBeats && <Spinner size={14} />}
+                        {generatingBeats ? '초안 생성 중...' : 'Beat Sheet 초안부터 시작'}
+                      </button>
+                      <button onClick={generateGameFlow} style={{
+                        padding: '12px 32px', borderRadius: 12, border: 'none',
+                        background: 'var(--accent)', color: 'var(--accent-fg)',
+                        fontSize: 15, fontWeight: 700, cursor: 'pointer',
+                      }}>
+                        에이전트 보고서 반영하기
+                      </button>
+                    </div>
+                    {beatsError && (
+                      <div style={{
+                        maxWidth: 520, margin: '16px auto 0', padding: '12px 14px',
+                        borderRadius: 12, background: 'rgba(239,68,68,0.1)',
+                        border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5',
+                        fontSize: 12.5, lineHeight: 1.6,
+                      }}>
+                        <strong style={{ color: '#f87171' }}>초안 생성 실패</strong>
+                        <div style={{ marginTop: 6, fontSize: 13, fontWeight: 600 }}>{beatsError}</div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

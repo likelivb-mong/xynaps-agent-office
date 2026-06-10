@@ -434,6 +434,19 @@ export function updateVersionGameFlow(
   saveProject(project)
 }
 
+export function updateVersionStoryBeats(
+  projectId: string,
+  versionId: string,
+  storyBeats: import('../types').StoryBeatsSheet
+): void {
+  const projects = getProjects()
+  const project = projects.find(p => p.id === projectId)!
+  const version = project.versions.find(v => v.id === versionId)!
+  version.storyBeats = storyBeats
+  project.updatedAt = new Date().toISOString()
+  saveProject(project)
+}
+
 export function updateVersionAudioScript(
   projectId: string,
   versionId: string,

@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 .env.local
 .vercel
+
+# 로컬 HTTPS 자체 서명 인증서 (개인키 — 커밋 금지)
+server/*.pem
