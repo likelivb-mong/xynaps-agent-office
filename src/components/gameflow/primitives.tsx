@@ -1,5 +1,12 @@
 import { useState } from 'react'
 
+// 편집 textarea 높이를 내용 전체가 보이도록 자동 조절
+function autoGrow(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight + 2}px`
+}
+
 // ── EditableCell ───────────────────────────────────────────────────────────
 export function EditableCell({
   value, onChange, multiline = false, placeholder = '', style,
@@ -22,9 +29,10 @@ export function EditableCell({
 
   if (editing) return multiline
     ? <textarea rows={2} value={draft} autoFocus
-        onChange={e => setDraft(e.target.value)} onBlur={commit}
+        ref={autoGrow}
+        onChange={e => { setDraft(e.target.value); autoGrow(e.target) }} onBlur={commit}
         onKeyDown={e => { if (e.key === 'Escape') { setDraft(value); setEditing(false) } }}
-        style={baseInput} />
+        style={{ ...baseInput, overflow: 'hidden', minHeight: 48 }} />
     : <input value={draft} autoFocus
         onChange={e => setDraft(e.target.value)} onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false) } }}
