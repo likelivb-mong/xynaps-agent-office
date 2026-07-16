@@ -1138,6 +1138,7 @@ export function NewProjectPage() {
   const [dragOverTarget, setDragOverTarget] = useState<KeywordDropTarget | null>(null)
   const [combinationSaving, setCombinationSaving] = useState(false)
   const [previewSummary, setPreviewSummary] = useState<string | null>(editingProject?.crimeConfig?.combinationSummary ?? null)
+  const [resetNotice, setResetNotice] = useState(false)
 
   // 관계 추가 폼 상태
   const [showRelationForm, setShowRelationForm] = useState(false)
@@ -1151,6 +1152,11 @@ export function NewProjectPage() {
   const autoFillBusy = autoFillPhase !== 'idle'
   const hasCrimePackUpload = Boolean(extractCrimePackFromFiles(crimePackFiles))
   const canNext = step === 0 ? name.trim() !== '' && theme.trim() !== '' && !autoFillBusy : true
+  const hasCrimeContent = motives.length > 0 || crimeTypes.length > 0 || clues.length > 0
+    || methods.length > 0 || genres.length > 0 || location.trim() !== ''
+    || characters.length > 0 || relations.length > 0
+    || storyFlow.some(stage => stage.description || stage.roomName)
+    || Boolean(previewSummary)
 
   const inputStyle: React.CSSProperties = {
     background: 'rgba(255,255,255,0.035)', border: '1px solid var(--border-bright)',
@@ -1427,6 +1433,43 @@ export function NewProjectPage() {
     setDraggingKeyword(null)
   }
 
+  function resetCrimeEncyclopedia() {
+    const saveLabel = isEditMode ? '편집 저장' : '프로젝트 시작'
+    const ok = confirm(
+      '수사 백과사전에 적어둔 내용을 모두 지울까요?\n\n'
+      + '· 장르, 배경 장소, 등장인물, 인물 관계\n'
+      + '· 게임 플레이 스토리 흐름\n'
+      + '· 키워드(동기·범죄 유형·단서·수법)\n\n'
+      + '프로젝트 이름·테마·지점 등 기본 정보와 첨부 자료는 그대로 유지됩니다.\n'
+      + `아직 저장되지 않으며, 하단 「${saveLabel}」을 눌러야 실제로 반영됩니다.`
+    )
+    if (!ok) return
+
+    setMotives([])
+    setCrimeTypes([])
+    setClues([])
+    setMethods([])
+    setGenres([])
+    setLocation('')
+    setCharacters([])
+    setRelations([])
+    setStoryFlow(STORY_STAGES.map(stage => ({ stage: stage as StoryStageKey, description: '', roomName: '' })))
+    setKeywordStates({ A: [], B: [], C: [], D: [] })
+    setPreviewSummary(null)
+
+    setShowRelationForm(false)
+    setEditingRelationId(null)
+    setRelFrom('')
+    setRelType('원한')
+    setRelCustomType('')
+    setRelTo('')
+    setRelDesc('')
+
+    setAutoFillError(null)
+    setAutoFillSummary(null)
+    setResetNotice(true)
+  }
+
   async function handleStart() {
     const normalized = splitThemeBundleFiles(themeBundleFiles)
     const finalFloorPlans = floorPlans.length > 0 ? floorPlans : normalized.floorPlans
@@ -1436,7 +1479,10 @@ export function NewProjectPage() {
       genres: normalizeGenres(genres), characters, relations, storyFlow,
     }
     if (editingProject) {
-      if (previewSummary) {
+      if (!hasCrimeContent) {
+        // 전체 초기화 직후 — 빈 내용으로 요약을 만들거나 이전 요약을 되살리지 않는다
+        crimeConfig.combinationSummary = undefined
+      } else if (previewSummary) {
         // 이미 재생성 버튼으로 생성된 결과가 있으면 그대로 사용
         crimeConfig.combinationSummary = previewSummary
       } else {
@@ -1825,6 +1871,24 @@ export function NewProjectPage() {
         </button>
         <span style={{ color: 'var(--border)' }}>|</span>
         <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>{isEditMode ? '수사 백과사전 편집' : '새 프로젝트'}</div>
+        {step > 0 && (
+          <button
+            onClick={resetCrimeEncyclopedia}
+            disabled={!hasCrimeContent}
+            title={hasCrimeContent ? '수사 백과사전에 적어둔 내용을 모두 비웁니다' : '비울 내용이 없습니다'}
+            style={{
+              marginLeft: 'auto',
+              padding: '7px 14px', borderRadius: 9,
+              border: `1px solid ${hasCrimeContent ? 'rgba(248,113,113,0.45)' : 'var(--border)'}`,
+              background: 'transparent',
+              color: hasCrimeContent ? '#fca5a5' : 'var(--text-muted)',
+              fontSize: 12, fontWeight: 700,
+              cursor: hasCrimeContent ? 'pointer' : 'not-allowed',
+            }}
+          >
+            전체 초기화
+          </button>
+        )}
       </header>
 
       <main style={{ padding: '34px 32px 40px', maxWidth: 780, margin: '0 auto', boxSizing: 'border-box' }}>
@@ -1843,6 +1907,33 @@ export function NewProjectPage() {
             </Fragment>
           ))}
         </div>
+
+        {resetNotice && (
+          <div style={{
+            marginTop: -20, marginBottom: 24,
+            padding: '11px 14px', borderRadius: 12,
+            border: '1px solid rgba(248,113,113,0.35)',
+            background: 'rgba(248,113,113,0.07)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          }}>
+            <div style={{ fontSize: 12, color: '#fca5a5', fontWeight: 600, lineHeight: 1.5 }}>
+              수사 백과사전 내용을 비웠습니다 — 아직 저장 전입니다.
+              <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                {' '}하단 「{isEditMode ? '편집 저장' : '프로젝트 시작'}」을 눌러야 반영되고, 그냥 나가면 원래 내용이 유지됩니다.
+              </span>
+            </div>
+            <button
+              onClick={() => setResetNotice(false)}
+              style={{
+                flexShrink: 0, padding: '5px 10px', borderRadius: 7,
+                border: '1px solid var(--border)', background: 'transparent',
+                color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              닫기
+            </button>
+          </div>
+        )}
 
         {/* ── STEP 1 ── */}
         {step === 0 && (
