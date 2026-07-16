@@ -250,55 +250,27 @@ export function HomePage() {
           }
         `}</style>
 
-        {/* 에이전트 팀 & 스킬 섹션 */}
-        <section style={{ marginBottom: 40 }}>
-          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>
-                에이전트 팀
-              </h2>
-              <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                스킬 파일을 업로드하면 AI가 분석하여 보고서 작성 시 전문 지식으로 활용합니다
-              </p>
-            </div>
-            <button onClick={() => navigate('/new-project')} style={{
-              padding: '7px 16px', borderRadius: 8, border: 'none',
-              background: 'var(--accent)', color: 'var(--accent-fg)',
-              fontSize: 12, fontWeight: 700, cursor: 'pointer',
-              letterSpacing: '0.01em', flexShrink: 0,
-            }}>
-              + 새 프로젝트
-            </button>
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
-            gap: 12,
-          }}>
-            <CommonSkillCard
-              skills={commonSkills}
-              onSkillsChange={reloadSkills}
-            />
-            {AGENTS.map(agent => (
-              <AgentCard
-                key={agent.id}
-                agent={{ ...agent, skills: skills[agent.id] || [] }}
-                skills={skills[agent.id] || []}
-                onSkillsChange={reloadSkills}
-              />
-            ))}
-          </div>
-        </section>
-
         {/* 프로젝트 섹션 */}
-        <section>
+        <section style={{ marginBottom: 40 }}>
           <div style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>
-              프로젝트
-            </h2>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              저장된 방탈출 테마 기획 프로젝트
-            </p>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>
+                  프로젝트
+                </h2>
+                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  저장된 방탈출 테마 기획 프로젝트
+                </p>
+              </div>
+              <button onClick={() => navigate('/new-project')} style={{
+                padding: '7px 16px', borderRadius: 8, border: 'none',
+                background: 'var(--accent)', color: 'var(--accent-fg)',
+                fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                letterSpacing: '0.01em', flexShrink: 0,
+              }}>
+                + 새 프로젝트
+              </button>
+            </div>
             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <button
@@ -670,6 +642,36 @@ export function HomePage() {
             </div>
           )}
 
+        </section>
+
+        {/* 에이전트 팀 & 스킬 섹션 */}
+        <section>
+          <div style={{ marginBottom: 16 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>
+              에이전트 팀
+            </h2>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              스킬 파일을 업로드하면 AI가 분석하여 보고서 작성 시 전문 지식으로 활용합니다
+            </p>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+            gap: 12,
+          }}>
+            <CommonSkillCard
+              skills={commonSkills}
+              onSkillsChange={reloadSkills}
+            />
+            {AGENTS.map(agent => (
+              <AgentCard
+                key={agent.id}
+                agent={{ ...agent, skills: skills[agent.id] || [] }}
+                skills={skills[agent.id] || []}
+                onSkillsChange={reloadSkills}
+              />
+            ))}
+          </div>
         </section>
       </main>
 
