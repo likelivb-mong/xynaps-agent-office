@@ -372,7 +372,15 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
-export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Props) {
+export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projectName }: Props) {
+  // 드래그·리사이즈·칸 칠하기가 진행되는 동안은 저장하지 않고 draft 로만 화면을 갱신한다.
+  // 매 mousemove 마다 저장하면 전체 프로젝트를 압축/해제하고 리렌더하느라 렉이 걸린다.
+  // 마우스를 놓는 순간 한 번만 onChange 로 커밋한다.
+  const [draftSheet, setDraftSheet] = useState<GameFlowSheet | null>(null)
+  const draftRef = useRef<GameFlowSheet | null>(null)
+  const gestureRef = useRef(false)
+  const sheet = draftSheet ?? savedSheet
+
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [hoverPin, setHoverPin] = useState<string | null>(null)
@@ -460,7 +468,27 @@ export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Pro
   }, [allSteps, isUserMode, sheet, userFlow])
 
   function updateSheet(next: GameFlowSheet) {
+    if (gestureRef.current) {
+      draftRef.current = next
+      setDraftSheet(next)
+      return
+    }
     onChange(next)
+  }
+
+  function beginGesture() {
+    gestureRef.current = true
+  }
+
+  // 제스처 종료 — draft 를 한 번만 저장하고 저장본 기준으로 되돌린다.
+  // reload() 가 동기라 prop 이 같은 배치에서 갱신되므로 깜빡임은 없다.
+  function endGesture() {
+    if (!gestureRef.current) return
+    gestureRef.current = false
+    const pending = draftRef.current
+    draftRef.current = null
+    setDraftSheet(null)
+    if (pending) onChange(pending)
   }
 
   function updatePin(stepId: string, pinX?: number, pinY?: number) {
@@ -620,6 +648,7 @@ export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Pro
     dragOffset.current = { x: e.clientX - currentX, y: e.clientY - currentY }
     setDraggingId(stepId)
     setSelectedId(null)
+    beginGesture()
 
     function onMove(me: MouseEvent) {
       if (!mapRef.current) return
@@ -631,6 +660,7 @@ export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Pro
 
     function onUp() {
       setDraggingId(null)
+      endGesture()
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -658,12 +688,17 @@ export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Pro
 
   function handleMapMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     if (mode !== 'path') return
+    beginGesture()
     const painted = applySectionCellEditFromPointer(e.clientX, e.clientY)
-    if (!painted) return
+    if (!painted) {
+      endGesture()
+      return
+    }
     sectionPaintRef.current.active = true
     function onUp() {
       sectionPaintRef.current.active = false
       sectionPaintRef.current.lastCell = null
+      endGesture()
       window.removeEventListener('mouseup', onUp)
     }
     window.addEventListener('mouseup', onUp)
@@ -695,6 +730,7 @@ export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Pro
     const startCol = ((e.clientX - rect.left) / rect.width) * STUDIO_COLS
     const startRow = ((e.clientY - rect.top) / rect.height) * STUDIO_ROWS
     const start = { ...box }
+    beginGesture()
 
     function onMove(me: MouseEvent) {
       if (!mapRef.current) return
@@ -745,6 +781,7 @@ export function GameFlowMap({ sheet, onChange, mode = 'path', projectName }: Pro
     }
 
     function onUp() {
+      endGesture()
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
