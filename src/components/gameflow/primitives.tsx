@@ -75,30 +75,51 @@ export function TogglePill({ value, onChange, col }: {
   )
 }
 
-// ── OUT PUT 태그 ────────────────────────────────────────────────────────────
-// 노션 멀티셀렉트처럼 프리셋 옵션 + 직접 생성. 색으로 구분해 표시한다.
-export const OUTPUT_TAG_OPTIONS: Array<{ label: string; fg: string; bg: string }> = [
-  { label: 'X-kit',    fg: '#cbd5e1', bg: 'rgba(148,163,184,0.28)' },
-  { label: 'Device',   fg: '#93c5fd', bg: 'rgba(59,130,246,0.30)' },
-  { label: 'Keypad',   fg: '#86efac', bg: 'rgba(34,197,94,0.26)' },
-  { label: 'Number',   fg: '#fde68a', bg: 'rgba(202,138,4,0.32)' },
-  { label: 'Alphabet', fg: '#f0abfc', bg: 'rgba(192,38,211,0.26)' },
-  { label: 'Key',      fg: '#fcd34d', bg: 'rgba(146,107,40,0.38)' },
-  { label: 'Dial',     fg: '#c4b5fd', bg: 'rgba(124,58,237,0.30)' },
-  { label: 'ACTION',   fg: '#fca5a5', bg: 'rgba(220,38,38,0.30)' },
-]
+// ── 분류 태그 (IN PUT / OUT PUT 공용) ───────────────────────────────────────
+// 노션 멀티셀렉트처럼 옵션 선택·생성·순서 편집·삭제. 색으로 구분해 표시한다.
+// 옵션 목록(순서 포함)은 localStorage 에 저장되어 모든 프로젝트에서 공유된다.
+const TAG_OPTIONS_LS_KEY = 'xynaps_gameflow_tag_options'
+const DEFAULT_TAG_OPTIONS = ['X-kit', 'Device', 'Keypad', 'Number', 'Alphabet', 'Key', 'Dial', 'ACTION', 'MP3', 'Video']
+
+const TAG_COLOR_PRESETS: Record<string, { fg: string; bg: string }> = {
+  'X-kit':    { fg: '#cbd5e1', bg: 'rgba(148,163,184,0.28)' },
+  'Device':   { fg: '#93c5fd', bg: 'rgba(59,130,246,0.30)' },
+  'Keypad':   { fg: '#86efac', bg: 'rgba(34,197,94,0.26)' },
+  'Number':   { fg: '#fde68a', bg: 'rgba(202,138,4,0.32)' },
+  'Alphabet': { fg: '#f0abfc', bg: 'rgba(192,38,211,0.26)' },
+  'Key':      { fg: '#fcd34d', bg: 'rgba(146,107,40,0.38)' },
+  'Dial':     { fg: '#c4b5fd', bg: 'rgba(124,58,237,0.30)' },
+  'ACTION':   { fg: '#fca5a5', bg: 'rgba(220,38,38,0.30)' },
+  'MP3':      { fg: '#67e8f9', bg: 'rgba(6,182,212,0.26)' },
+  'Video':    { fg: '#fdba74', bg: 'rgba(234,88,12,0.28)' },
+}
+const TAG_COLOR_CYCLE = Object.values(TAG_COLOR_PRESETS)
+
+export function loadTagOptions(): string[] {
+  try {
+    const raw = localStorage.getItem(TAG_OPTIONS_LS_KEY)
+    if (raw) {
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr) && arr.every(x => typeof x === 'string')) return arr
+    }
+  } catch { /* ignore */ }
+  return [...DEFAULT_TAG_OPTIONS]
+}
+
+function saveTagOptions(opts: string[]): void {
+  try { localStorage.setItem(TAG_OPTIONS_LS_KEY, JSON.stringify(opts)) } catch { /* ignore */ }
+}
 
 export function outputTagColor(label: string): { fg: string; bg: string } {
-  const preset = OUTPUT_TAG_OPTIONS.find(o => o.label === label)
+  const preset = TAG_COLOR_PRESETS[label]
   if (preset) return preset
   // 커스텀 태그: 라벨 해시로 프리셋 색을 순환 재사용
   let h = 0
   for (const ch of label) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  const o = OUTPUT_TAG_OPTIONS[h % OUTPUT_TAG_OPTIONS.length]
-  return { fg: o.fg, bg: o.bg }
+  return TAG_COLOR_CYCLE[h % TAG_COLOR_CYCLE.length]
 }
 
-export function OutputTagChip({ label, onRemove }: { label: string; onRemove?: () => void }) {
+export function TagChip({ label, onRemove }: { label: string; onRemove?: () => void }) {
   const c = outputTagColor(label)
   return (
     <span style={{
@@ -118,9 +139,11 @@ export function OutputTagChip({ label, onRemove }: { label: string; onRemove?: (
   )
 }
 
-export function OutputTagPicker({ tags, onChange }: { tags: string[]; onChange: (next: string[]) => void }) {
+export function TagPicker({ tags, onChange }: { tags: string[]; onChange: (next: string[]) => void }) {
   const [open, setOpen] = useState(false)
+  const [manage, setManage] = useState(false)
   const [query, setQuery] = useState('')
+  const [options, setOptions] = useState<string[]>([])
   const btnRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
@@ -130,6 +153,8 @@ export function OutputTagPicker({ tags, onChange }: { tags: string[]; onChange: 
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setPos({ x: r.left, y: r.bottom + 4 })
     setQuery('')
+    setManage(false)
+    setOptions(loadTagOptions())
     setOpen(v => !v)
   }
 
@@ -150,20 +175,47 @@ export function OutputTagPicker({ tags, onChange }: { tags: string[]; onChange: 
   function toggle(label: string) {
     onChange(tags.includes(label) ? tags.filter(t => t !== label) : [...tags, label])
   }
+  function createOption(label: string) {
+    if (!options.includes(label)) {
+      const next = [...options, label]
+      setOptions(next)
+      saveTagOptions(next)
+    }
+    if (!tags.includes(label)) onChange([...tags, label])
+    setQuery('')
+  }
+  function moveOption(label: string, dir: -1 | 1) {
+    const i = options.indexOf(label)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= options.length) return
+    const next = [...options]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setOptions(next)
+    saveTagOptions(next)
+  }
+  function deleteOption(label: string) {
+    const next = options.filter(o => o !== label)
+    setOptions(next)
+    saveTagOptions(next)
+  }
 
   const q = query.trim()
-  const filtered = OUTPUT_TAG_OPTIONS.filter(o => !q || o.label.toLowerCase().includes(q.toLowerCase()))
-  const customSelected = tags.filter(t => !OUTPUT_TAG_OPTIONS.some(o => o.label === t))
-  const canCreate = q.length > 0
-    && !OUTPUT_TAG_OPTIONS.some(o => o.label.toLowerCase() === q.toLowerCase())
-    && !tags.some(t => t.toLowerCase() === q.toLowerCase())
+  const filtered = options.filter(o => !q || o.toLowerCase().includes(q.toLowerCase()))
+  const orphanSelected = tags.filter(t => !options.includes(t))
+  const canCreate = q.length > 0 && !options.some(o => o.toLowerCase() === q.toLowerCase())
+
+  const miniBtn: React.CSSProperties = {
+    width: 18, height: 18, borderRadius: 5, border: '1px solid var(--border)',
+    background: 'transparent', color: 'var(--text-muted)', fontSize: 10, lineHeight: 1,
+    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+  }
 
   return (
     <>
       <button
         ref={btnRef}
         onClick={openPanel}
-        title="OUT PUT 태그 선택"
+        title="분류 태그 선택"
         style={{
           width: 18, height: 18, borderRadius: 6, flexShrink: 0,
           border: '1px dashed var(--border)', background: 'transparent',
@@ -176,45 +228,79 @@ export function OutputTagPicker({ tags, onChange }: { tags: string[]; onChange: 
         <div
           ref={panelRef}
           style={{
-            position: 'fixed', left: Math.min(pos.x, window.innerWidth - 200), top: pos.y, zIndex: 9999,
-            width: 188, maxHeight: 260, overflowY: 'auto',
+            position: 'fixed', left: Math.min(pos.x, window.innerWidth - 220), top: pos.y, zIndex: 9999,
+            width: 208, maxHeight: 300, overflowY: 'auto',
             background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
             boxShadow: '0 12px 32px rgba(0,0,0,0.45)', padding: 6,
           }}
         >
-          <input
-            autoFocus
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && canCreate) { toggle(q); setQuery('') } }}
-            placeholder="옵션 선택 또는 생성"
-            style={{
-              width: '100%', boxSizing: 'border-box', marginBottom: 6,
-              background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
-              borderRadius: 7, padding: '5px 8px', fontSize: 11, color: 'var(--text-primary)', outline: 'none',
-            }}
-          />
-          {[...customSelected.map(label => ({ label })), ...filtered].map(({ label }) => {
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            <input
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && canCreate) createOption(q) }}
+              placeholder="옵션 선택 또는 생성"
+              style={{
+                flex: 1, minWidth: 0, boxSizing: 'border-box',
+                background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
+                borderRadius: 7, padding: '5px 8px', fontSize: 11, color: 'var(--text-primary)', outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => setManage(v => !v)}
+              title={manage ? '편집 완료' : '옵션 편집 (순서·삭제)'}
+              style={{
+                flexShrink: 0, width: 26, borderRadius: 7,
+                border: manage ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: manage ? 'var(--accent-dim)' : 'transparent',
+                color: manage ? 'var(--accent)' : 'var(--text-muted)',
+                fontSize: 12, cursor: 'pointer',
+              }}
+            >{manage ? '✓' : '⚙'}</button>
+          </div>
+          {orphanSelected.map(label => (
+            <div
+              key={`orphan-${label}`}
+              onClick={() => toggle(label)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 6px', borderRadius: 7, cursor: 'pointer' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <TagChip label={label} />
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 800 }}>✓</span>
+            </div>
+          ))}
+          {filtered.map(label => {
             const active = tags.includes(label)
             return (
               <div
                 key={label}
-                onClick={() => toggle(label)}
+                onClick={() => { if (!manage) toggle(label) }}
                 style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '4px 6px', borderRadius: 7, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+                  padding: '4px 6px', borderRadius: 7, cursor: manage ? 'default' : 'pointer',
                 }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <OutputTagChip label={label} />
-                {active && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 800 }}>✓</span>}
+                <TagChip label={label} />
+                {manage ? (
+                  <span style={{ display: 'inline-flex', gap: 3, flexShrink: 0 }}>
+                    <button style={miniBtn} title="위로" onClick={e => { e.stopPropagation(); moveOption(label, -1) }}>↑</button>
+                    <button style={miniBtn} title="아래로" onClick={e => { e.stopPropagation(); moveOption(label, 1) }}>↓</button>
+                    <button style={{ ...miniBtn, color: 'rgba(255,90,90,0.8)' }} title="옵션 삭제"
+                      onClick={e => { e.stopPropagation(); deleteOption(label) }}>×</button>
+                  </span>
+                ) : (
+                  active && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 800 }}>✓</span>
+                )}
               </div>
             )
           })}
-          {canCreate && (
+          {canCreate && !manage && (
             <div
-              onClick={() => { toggle(q); setQuery('') }}
+              onClick={() => createOption(q)}
               style={{ padding: '5px 6px', borderRadius: 7, cursor: 'pointer', fontSize: 11, color: 'var(--text-muted)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -228,6 +314,10 @@ export function OutputTagPicker({ tags, onChange }: { tags: string[]; onChange: 
     </>
   )
 }
+
+// 기존 사용처 호환 별칭
+export const OutputTagChip = TagChip
+export const OutputTagPicker = TagPicker
 
 export function DragHandleDots() {
   return (

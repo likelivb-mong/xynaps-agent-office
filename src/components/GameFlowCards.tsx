@@ -4,7 +4,7 @@ import {
   PALETTES, COL,
   getSectionAlphaLabel, computeStepLabels, useGameFlowEditing,
 } from './gameflow/editing'
-import { EditableCell, TogglePill, DragHandleDots, OutputTagChip, OutputTagPicker } from './gameflow/primitives'
+import { EditableCell, TogglePill, DragHandleDots, TagChip, TagPicker } from './gameflow/primitives'
 
 // ── 작은 안쪽 화살표 아이콘 (In / Out 라벨용) ──────────────────────────────────
 function InArrow() {
@@ -240,6 +240,16 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                           <InArrow />In
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* IN PUT 분류 태그 (색 구분) */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.inputTags?.length ?? 0) > 0 ? 3 : 0, paddingTop: 4 }}>
+                            {(step.inputTags ?? []).map(tag => (
+                              <TagChip key={tag} label={tag}
+                                onRemove={() => updateStep(section.id, step.id, { inputTags: (step.inputTags ?? []).filter(t => t !== tag) })} />
+                            ))}
+                            <TagPicker
+                              tags={step.inputTags ?? []}
+                              onChange={next => updateStep(section.id, step.id, { inputTags: next })} />
+                          </div>
                           <EditableCell
                             value={step.auto ? `(AUTO) ${step.input}` : step.input}
                             onChange={v => {
@@ -265,10 +275,10 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                           {/* OUT PUT 분류 태그 (색 구분) */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.outputTags?.length ?? 0) > 0 ? 3 : 0, paddingTop: 4 }}>
                             {(step.outputTags ?? []).map(tag => (
-                              <OutputTagChip key={tag} label={tag}
+                              <TagChip key={tag} label={tag}
                                 onRemove={() => updateStep(section.id, step.id, { outputTags: (step.outputTags ?? []).filter(t => t !== tag) })} />
                             ))}
-                            <OutputTagPicker
+                            <TagPicker
                               tags={step.outputTags ?? []}
                               onChange={next => updateStep(section.id, step.id, { outputTags: next })} />
                           </div>
