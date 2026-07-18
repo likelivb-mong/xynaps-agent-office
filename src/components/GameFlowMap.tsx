@@ -22,6 +22,29 @@ interface Props {
 }
 
 const SECTION_COLORS = ['#9b6dff', '#4da6ff', '#00d4aa', '#ff7043', '#ff6b9d']
+
+// 도면(맵 표면) 라이트/다크 테마. 앱 테마와 별개로 도면만 전환한다 — 밝은 도면은
+// 현장 확인·인쇄 대조 시 가독성이 좋다. 선택은 localStorage 에 저장된다.
+const MAP_THEMES = {
+  dark: {
+    surface: '#0d1117',
+    surfaceActive: 'radial-gradient(circle, #1a2a3a 0%, #0d1117 100%)',
+    gridBg: '#0a0a14', gridLine: '#4a5568', gridOpacity: 0.15,
+    labelBg: 'rgba(0,0,0,0.35)',
+    pinRing: '#0d1117', pinLightDisc: false,
+    answerBg: '#1a1a2e', answerText: '#f0f0f5',
+  },
+  light: {
+    surface: '#fbfcfe',
+    surfaceActive: 'radial-gradient(circle, #edf3fb 0%, #fbfcfe 100%)',
+    gridBg: '#f3f5f9', gridLine: '#8d9aad', gridOpacity: 0.35,
+    labelBg: 'rgba(255,255,255,0.92)',
+    pinRing: '#ffffff', pinLightDisc: true,
+    answerBg: '#ffffff', answerText: '#1c2333',
+  },
+} as const
+type MapThemeKey = keyof typeof MAP_THEMES
+const MAP_THEME_LS_KEY = 'xynaps_passmap_map_theme'
 const DEFAULT_SECTION_MAP_BOXES = [
   { x: 2, y: 3, w: 12, h: 11 },
   { x: 15, y: 2, w: 13, h: 12 },
@@ -387,6 +410,12 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
   const [sectionCellEditMode, setSectionCellEditMode] = useState<'add' | 'remove' | null>(null)
   const [mapHeight, setMapHeight] = useState<number | null>(null)
+  // 도면 라이트/다크 테마 (도면 표면에만 적용, 선호 저장)
+  const [mapTheme, setMapTheme] = useState<MapThemeKey>(() => {
+    try { return localStorage.getItem(MAP_THEME_LS_KEY) === 'light' ? 'light' : 'dark' } catch { return 'dark' }
+  })
+  // 인쇄용 미리보기(정답지) 오버레이
+  const [showPrint, setShowPrint] = useState(false)
   const [hoverPinRect, setHoverPinRect] = useState<{ x: number; y: number; step: StepWithContext; color: string } | null>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const dragOffset = useRef({ x: 0, y: 0 })
@@ -462,6 +491,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
 
   const userFlow = useMemo(() => buildUserFlow(sheet, projectName), [sheet, projectName])
   const isUserMode = mode === 'user'
+  const MT = MAP_THEMES[mapTheme]
 
   useEffect(() => {
     if (!selectedSectionId) return
@@ -474,6 +504,28 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     const synced = syncXkitScreens(userFlow, allSteps)
     if (synced !== userFlow) updateSheet({ ...sheet, userFlow: synced })
   }, [allSteps, isUserMode, sheet, userFlow])
+
+  // Esc — 현재 진행 중인 모드를 우선순위대로 취소한다
+  // (인쇄 미리보기 → 모양 편집 → 스텝 배치 대기 → 섹션 선택)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (showPrint) setShowPrint(false)
+      else if (sectionCellEditMode) setSectionCellEditMode(null)
+      else if (selectedId) setSelectedId(null)
+      else if (selectedSectionId) setSelectedSectionId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showPrint, sectionCellEditMode, selectedId, selectedSectionId])
+
+  function toggleMapTheme() {
+    setMapTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark'
+      try { localStorage.setItem(MAP_THEME_LS_KEY, next) } catch { /* ignore */ }
+      return next
+    })
+  }
 
   function updateSheet(next: GameFlowSheet) {
     if (gestureRef.current) {
@@ -681,7 +733,9 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
       return
     }
     // 도면 클릭 배치는 제거됨(원래 섹션으로 clamp되어 엉뚱한 자리로 튀는 문제).
-    // 미배치 스텝은 상단 '섹션 선택' 버튼으로만 배치한다. 여기서는 섹션 선택 해제만.
+    // 미배치 스텝은 상단 '섹션 선택' 버튼으로만 배치한다.
+    // 바탕 클릭은 진행 중인 선택(배치 대기 스텝 → 섹션 선택 순)을 취소한다.
+    if (selectedId) { setSelectedId(null); return }
     setSelectedSectionId(null)
   }
 
@@ -723,23 +777,57 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     updatePin(stepId, undefined, undefined)
   }
 
-  function applySectionCellEditFromPointer(clientX: number, clientY: number): boolean {
-    if (!sectionCellEditMode || !selectedSectionId || selectedId || !mapRef.current) return false
+  // 'painted' = 칠함 / 'skip' = 대상 아님(드래그 중 무시) / 'cancel' = 바탕 클릭 → 모드 종료 / 'none' = 편집 상태 아님
+  function applySectionCellEditFromPointer(clientX: number, clientY: number, initial: boolean): 'painted' | 'skip' | 'cancel' | 'none' {
+    if (!sectionCellEditMode || !selectedSectionId || selectedId || !mapRef.current) return 'none'
     const rect = mapRef.current.getBoundingClientRect()
     const col = Math.max(0, Math.min(STUDIO_COLS - 1, Math.floor(((clientX - rect.left) / rect.width) * STUDIO_COLS)))
     const row = Math.max(0, Math.min(STUDIO_ROWS - 1, Math.floor(((clientY - rect.top) / rect.height) * STUDIO_ROWS)))
     const key = cellKey(col, row)
-    if (sectionPaintRef.current.active && sectionPaintRef.current.lastCell === key) return true
+    if (sectionPaintRef.current.active && sectionPaintRef.current.lastCell === key) return 'painted'
+
+    // 선택 섹션과 무관한 격자 바탕을 클릭하면 편집을 종료한다.
+    // - 추가 모드: 섹션 칸이거나 그에 인접(8방향)한 칸만 유효
+    // - 제거 모드: 섹션 칸만 유효
+    const secIndex = sheet.sections.findIndex(sec => sec.id === selectedSectionId)
+    if (secIndex >= 0) {
+      const cells = getSectionCellSet(sheet.sections[secIndex], secIndex)
+      const inCells = cells.has(key)
+      let valid: boolean
+      if (sectionCellEditMode === 'add') {
+        let adjacent = inCells
+        if (!adjacent) {
+          for (let dx = -1; dx <= 1 && !adjacent; dx += 1) {
+            for (let dy = -1; dy <= 1 && !adjacent; dy += 1) {
+              if (dx === 0 && dy === 0) continue
+              if (cells.has(cellKey(col + dx, row + dy))) adjacent = true
+            }
+          }
+        }
+        valid = adjacent
+      } else {
+        valid = inCells
+      }
+      if (!valid) return initial ? 'cancel' : 'skip'
+    }
+
     sectionPaintRef.current.lastCell = key
     editSectionCell(selectedSectionId, col, row, sectionCellEditMode)
-    return true
+    return 'painted'
   }
 
   function handleMapMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     if (mode !== 'path') return
     beginGesture()
-    const painted = applySectionCellEditFromPointer(e.clientX, e.clientY)
-    if (!painted) {
+    const result = applySectionCellEditFromPointer(e.clientX, e.clientY, true)
+    if (result === 'cancel') {
+      // 격자 바탕 클릭 → 섹션 모양 편집 종료
+      endGesture()
+      setSectionCellEditMode(null)
+      skipNextMapClickRef.current = true
+      return
+    }
+    if (result !== 'painted') {
       endGesture()
       return
     }
@@ -755,7 +843,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
 
   function handleMapMouseMove(e: React.MouseEvent<HTMLDivElement>) {
     if (!sectionPaintRef.current.active || mode !== 'path') return
-    applySectionCellEditFromPointer(e.clientX, e.clientY)
+    applySectionCellEditFromPointer(e.clientX, e.clientY, false)
   }
 
   function startSectionBoxDrag(
@@ -866,12 +954,46 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              {selectedId && <span style={{ color: '#f59e0b', fontWeight: 700 }}>선택한 스텝 — 배치할 섹션 버튼을 누르세요 ▶</span>}
-              {!selectedId && unplacedSteps.length > 0 && <span>아래 미배치 스텝을 클릭해 배치할 수 있습니다</span>}
-              {unplacedSteps.length === 0 && <span style={{ color: '#00d4aa' }}>모든 스텝이 배치되었습니다</span>}
+              {sectionCellEditMode ? (
+                <span style={{ color: sectionCellEditMode === 'add' ? '#b6ff61' : '#ef4444', fontWeight: 700 }}>
+                  섹션 모양 {sectionCellEditMode === 'add' ? '추가' : '제거'} 모드 — {selectedSectionId
+                    ? '칸을 클릭·드래그하세요 · 바탕 클릭 또는 Esc로 종료'
+                    : '먼저 「섹션 선택」에서 편집할 섹션을 고르세요'}
+                </span>
+              ) : selectedId ? (
+                <span style={{ color: '#f59e0b', fontWeight: 700 }}>선택한 스텝 — 배치할 섹션 버튼을 누르세요 ▶ <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>(바탕 클릭 · Esc 취소)</span></span>
+              ) : unplacedSteps.length > 0 ? (
+                <span>아래 미배치 스텝을 클릭해 배치할 수 있습니다</span>
+              ) : (
+                <span style={{ color: '#00d4aa' }}>모든 스텝이 배치되었습니다</span>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'inline-flex', gap: 6 }}>
+                <button
+                  onClick={toggleMapTheme}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+                    border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)',
+                    color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}
+                  title="도면 배경 밝기 전환"
+                >
+                  {mapTheme === 'dark' ? '☀ 밝은 도면' : '🌙 어두운 도면'}
+                </button>
+                <button
+                  onClick={() => setShowPrint(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+                    border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)',
+                    color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}
+                  title="인쇄용 정답지 미리보기"
+                >
+                  🖨 인쇄
+                </button>
+              </div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>
                   섹션 모양 편집
@@ -965,12 +1087,12 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                   style={{
                     position: 'absolute',
                     inset: 0,
-                    background: selectedId ? 'radial-gradient(circle, #1a2a3a 0%, #0d1117 100%)' : '#0d1117',
+                    background: selectedId ? MT.surfaceActive : MT.surface,
                     cursor: sectionCellEditMode ? 'crosshair' : draggingId ? 'grabbing' : 'default',
                     userSelect: 'none',
                   }}
                 >
-              <FloorPlanPlaceholder />
+              <FloorPlanPlaceholder bg={MT.gridBg} line={MT.gridLine} opacity={MT.gridOpacity} />
 
               {sheet.sections.map((sec, i) => {
                 const color = sectionColorMap[sec.id] || SECTION_COLORS[i % SECTION_COLORS.length]
@@ -1099,7 +1221,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                         lineHeight: 1.2,
                         padding: '2px 6px',
                         borderRadius: 6,
-                        background: selectedSection ? `${color}22` : 'rgba(0,0,0,0.35)',
+                        background: selectedSection ? `${color}22` : MT.labelBg,
                         border: `1px solid ${color}66`,
                         cursor: mode === 'path' ? 'move' : 'default',
                         pointerEvents: selectedId ? 'none' : 'auto',
@@ -1200,7 +1322,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                       width: isDragging || isHover ? 36 : 30,
                       height: isDragging || isHover ? 36 : 30,
                       borderRadius: '50%',
-                      background: pinBg,
+                      background: MT.pinLightDisc ? '#ffffff' : pinBg,
                       border: `2px solid ${pinColor}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       boxShadow: `0 0 ${isHover ? 12 : 6}px ${pinColor}88`,
@@ -1213,7 +1335,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                       <div style={{
                         position: 'absolute', bottom: -2, right: -2,
                         width: 8, height: 8, borderRadius: '50%',
-                        background: sectionColor, border: '1px solid #0d1117',
+                        background: sectionColor, border: `1px solid ${MT.pinRing}`,
                       }} />
                     </div>
                     <div
@@ -1224,8 +1346,8 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                         transform: answerOnRight ? 'translate(8px, -50%)' : 'translate(-8px, -50%)',
                         fontSize: 10,
                         fontWeight: 700,
-                        color: 'var(--text-primary)',
-                        background: '#1a1a2e',
+                        color: MT.answerText,
+                        background: MT.answerBg,
                         border: `1px solid ${pinColor}66`,
                         borderRadius: 6,
                         padding: '2px 6px',
@@ -1355,6 +1477,18 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
           onUpdateScreen={updateUserScreen}
           onUploadScreen={handleUserScreenUpload}
         />
+      )}
+
+      {/* 인쇄용 정답지 미리보기 — 밝은 배경 고정, A4 가로 최적화 */}
+      {showPrint && createPortal(
+        <PassMapPrintView
+          sheet={sheet}
+          allSteps={allSteps}
+          sectionColorMap={sectionColorMap}
+          projectName={projectName}
+          onClose={() => setShowPrint(false)}
+        />,
+        document.body
       )}
 
       {/* 핀 호버 팝업 — overflow:hidden 프레임 밖에 포털로 렌더링 */}
@@ -2070,13 +2204,209 @@ const xkitSubtypeMeta: Record<'Clues' | 'Audio' | 'Video', { short: string; colo
   Video: { short: 'VIDEO', color: '#f472b6', bg: 'rgba(244,114,182,0.14)' },
 }
 
-function FloorPlanPlaceholder() {
+// ── 인쇄용 정답지(PassMap Print) ─────────────────────────────────────────────
+// 현장 GM이 종이로 들고 쓰는 정답지. 잉크 친화적 밝은 배경으로 고정하고
+// A4 가로 기준으로 도면(SVG) + 범례 + 섹션별 정답표를 한 문서로 구성한다.
+function PassMapPrintView({
+  sheet, allSteps, sectionColorMap, projectName, onClose,
+}: {
+  sheet: GameFlowSheet
+  allSteps: StepWithContext[]
+  sectionColorMap: Record<string, string>
+  projectName?: string
+  onClose: () => void
+}) {
+  const placed = allSteps.filter(s => s.pinX !== undefined && s.pinY !== undefined)
+  const printedAt = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+  const flagBadge = (bg: string, fg: string): React.CSSProperties => ({
+    display: 'inline-block', fontSize: 9, fontWeight: 800, color: fg, background: bg,
+    borderRadius: 4, padding: '1px 5px', marginRight: 3, letterSpacing: 0.3,
+  })
   return (
-    <div style={{ position: 'absolute', inset: 0, background: '#0a0a14' }}>
-      <svg viewBox={`0 0 ${STUDIO_WIDTH} ${STUDIO_HEIGHT}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.15 }}>
+    <div
+      className="passmap-print-root"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10000, overflow: 'auto',
+        background: '#ffffff', color: '#151a24',
+        fontFamily: 'inherit', padding: '20px 28px 40px',
+      }}
+    >
+      <style>{`
+        @media print {
+          @page { size: A4 landscape; margin: 10mm; }
+          body * { visibility: hidden !important; }
+          .passmap-print-root, .passmap-print-root * { visibility: visible !important; }
+          .passmap-print-root { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; height: auto !important; overflow: visible !important; padding: 0 !important; }
+          .passmap-no-print { display: none !important; }
+          .passmap-print-section { break-inside: avoid; }
+        }
+        .passmap-print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      `}</style>
+
+      {/* 화면 전용 상단 바 */}
+      <div className="passmap-no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #e3e7ee' }}>
+        <div style={{ fontSize: 14, fontWeight: 800 }}>인쇄 미리보기 — PassMap 정답지</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => window.print()}
+            style={{ padding: '8px 16px', borderRadius: 10, border: 'none', background: '#151a24', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+          >
+            🖨 인쇄하기
+          </button>
+          <button
+            onClick={onClose}
+            style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid #d4dae4', background: '#fff', color: '#3a4356', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          >
+            닫기 (Esc)
+          </button>
+        </div>
+      </div>
+
+      {/* 문서 헤더 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+        <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: -0.3 }}>
+          PassMap 정답지{projectName ? ` · ${projectName}` : ''}
+        </div>
+        <div style={{ fontSize: 11, color: '#6b7280' }}>
+          {sheet.sections.length}개 섹션 · {allSteps.length}개 스텝 · 출력일 {printedAt}
+        </div>
+      </div>
+
+      {/* 도면 (SVG — 인쇄에서 벡터로 선명) */}
+      <svg
+        viewBox={`0 0 ${STUDIO_COLS} ${STUDIO_ROWS}`}
+        style={{ width: '100%', border: '1px solid #ccd3de', borderRadius: 8, background: '#ffffff', display: 'block' }}
+      >
+        {Array.from({ length: STUDIO_COLS + 1 }).map((_, i) => (
+          <line key={`v${i}`} x1={i} y1={0} x2={i} y2={STUDIO_ROWS} stroke="#eef1f6" strokeWidth={0.04} />
+        ))}
+        {Array.from({ length: STUDIO_ROWS + 1 }).map((_, i) => (
+          <line key={`h${i}`} x1={0} y1={i} x2={STUDIO_COLS} y2={i} stroke="#eef1f6" strokeWidth={0.04} />
+        ))}
+        {sheet.sections.map((sec, i) => {
+          const color = sectionColorMap[sec.id] || SECTION_COLORS[i % SECTION_COLORS.length]
+          const box = getSectionMapBox(sec, i)
+          const cells = getSectionCellSet(sec, i)
+          const outline = buildSectionOutlineSegments(cells)
+          const labelAnchor = getSectionLabelAnchor(cells, box)
+          return (
+            <g key={sec.id}>
+              {Array.from(cells).map(k => {
+                const p = parseCellKey(k)
+                return <rect key={k} x={p.x} y={p.y} width={1} height={1} fill={`${color}14`} />
+              })}
+              {outline.map((s, idx) => (
+                <line key={idx} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke={color} strokeWidth={0.12} strokeLinecap="square" />
+              ))}
+              <text
+                x={labelAnchor.x + 0.35} y={labelAnchor.y + 1.05}
+                fontSize={0.95} fontWeight={800} fill={color}
+                stroke="#ffffff" strokeWidth={0.16} paintOrder="stroke"
+              >
+                {getSectionDisplayTitle(i, sec.title)}
+              </text>
+            </g>
+          )
+        })}
+        {placed.map(step => {
+          const pinColor = getPinColor(step)
+          const cx = ((step.pinX ?? 0) / 100) * STUDIO_COLS
+          const cy = ((step.pinY ?? 0) / 100) * STUDIO_ROWS
+          const answer = (step.output || '').trim()
+          const onRight = (step.pinX ?? 0) <= 62
+          return (
+            <g key={step.id}>
+              <circle cx={cx} cy={cy} r={0.78} fill="#ffffff" stroke={pinColor} strokeWidth={0.16} />
+              <text x={cx} y={cy + 0.3} fontSize={0.8} fontWeight={800} fill="#1c2333" textAnchor="middle">
+                {step.displayIndex}
+              </text>
+              {answer && (
+                <text
+                  x={onRight ? cx + 1.15 : cx - 1.15} y={cy + 0.27}
+                  fontSize={0.72} fontWeight={700} fill="#2a3242"
+                  textAnchor={onRight ? 'start' : 'end'}
+                  stroke="#ffffff" strokeWidth={0.14} paintOrder="stroke"
+                >
+                  {answer.length > 26 ? `${answer.slice(0, 26)}…` : answer}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+
+      {/* 범례 */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', margin: '10px 2px 18px', fontSize: 10.5, color: '#4a5468' }}>
+        <span style={{ fontWeight: 800 }}>분류</span>
+        {[
+          { label: 'Xkit', color: '#b45309' },
+          { label: 'Lock/Key', color: '#0f766e' },
+          { label: 'Dev', color: '#1d4ed8' },
+          { label: '기타', color: '#7c3aed' },
+          { label: 'AUTO', color: '#6b7280' },
+        ].map(item => (
+          <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: item.color, display: 'inline-block' }} />
+            {item.label}
+          </span>
+        ))}
+        <span style={{ marginLeft: 'auto' }}>핀 번호는 섹션 내 순번 · 라벨은 OUT PUT(획득/개방)</span>
+      </div>
+
+      {/* 섹션별 정답표 */}
+      {sheet.sections.map((sec, i) => {
+        const color = sectionColorMap[sec.id] || SECTION_COLORS[i % SECTION_COLORS.length]
+        return (
+          <div key={sec.id} className="passmap-print-section" style={{ marginBottom: 14 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px',
+              background: `${color}14`, borderLeft: `4px solid ${color}`, borderRadius: 4, marginBottom: 4,
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 900, color: '#1c2333' }}>{getSectionDisplayTitle(i, sec.title)}</span>
+              <span style={{ fontSize: 10, color: '#6b7280' }}>{sec.steps.length}개 스텝</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5 }}>
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid #d4dae4', color: '#4a5468' }}>
+                  <th style={{ width: 26, padding: '3px 6px', textAlign: 'left' }}>No</th>
+                  <th style={{ padding: '3px 6px', textAlign: 'left' }}>단서</th>
+                  <th style={{ padding: '3px 6px', textAlign: 'left' }}>IN PUT (입력·행동)</th>
+                  <th style={{ padding: '3px 6px', textAlign: 'left' }}>OUT PUT (획득·개방)</th>
+                  <th style={{ width: 120, padding: '3px 6px', textAlign: 'left' }}>표식</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sec.steps.map((step, si) => (
+                  <tr key={step.id} style={{ borderBottom: '1px solid #eceff4', verticalAlign: 'top' }}>
+                    <td style={{ padding: '3px 6px', fontWeight: 800, color }}>{si + 1}</td>
+                    <td style={{ padding: '3px 6px', fontWeight: 700 }}>{step.clue || '—'}</td>
+                    <td style={{ padding: '3px 6px', color: '#3a4356' }}>{step.input || '—'}</td>
+                    <td style={{ padding: '3px 6px', color: '#3a4356' }}>{step.output || '—'}</td>
+                    <td style={{ padding: '3px 6px' }}>
+                      {step.xkit && <span style={flagBadge('#fef3c7', '#b45309')}>XKIT</span>}
+                      {step.key && <span style={flagBadge('#ccfbf1', '#0f766e')}>KEY</span>}
+                      {step.dev && <span style={flagBadge('#dbeafe', '#1d4ed8')}>DEV</span>}
+                      {step.auto && <span style={flagBadge('#f3f4f6', '#6b7280')}>AUTO</span>}
+                      {step.problemType && <span style={flagBadge('#ede9fe', '#7c3aed')}>{step.problemType}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function FloorPlanPlaceholder({ bg, line, opacity }: { bg: string; line: string; opacity: number }) {
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: bg }}>
+      <svg viewBox={`0 0 ${STUDIO_WIDTH} ${STUDIO_HEIGHT}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity }}>
         <defs>
           <pattern id="grid" width={STUDIO_TILE} height={STUDIO_TILE} patternUnits="userSpaceOnUse">
-            <path d={`M ${STUDIO_TILE} 0 L 0 0 0 ${STUDIO_TILE}`} fill="none" stroke="#4a5568" strokeWidth="0.5" />
+            <path d={`M ${STUDIO_TILE} 0 L 0 0 0 ${STUDIO_TILE}`} fill="none" stroke={line} strokeWidth="0.5" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#grid)" />
