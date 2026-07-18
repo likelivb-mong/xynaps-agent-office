@@ -27,7 +27,7 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
     collapsed, toggleCollapse,
     hoveredRow, setHoveredRow,
     armedDragId, setArmedDragId, draggingStep, dragOver,
-    updateSection, updateStep, addStep, deleteStep, toggleStepFlag,
+    updateSection, updateStep, updateStepInput, addStep, deleteStep, toggleStepFlag,
     addSection, deleteSection, exportCSV,
     handleRowDragStart, handleRowDragOver, handleRowDrop,
     handleSectionDragOver, handleSectionDrop, clearDrag,
@@ -246,16 +246,13 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                               <TagChip key={tag} label={tag}
                                 onRemove={() => updateStep(section.id, step.id, { inputTags: (step.inputTags ?? []).filter(t => t !== tag) })} />
                             ))}
-                            <TagPicker
+                            <TagPicker kind="input"
                               tags={step.inputTags ?? []}
                               onChange={next => updateStep(section.id, step.id, { inputTags: next })} />
                           </div>
                           <EditableCell
                             value={step.auto ? `(AUTO) ${step.input}` : step.input}
-                            onChange={v => {
-                              const a = v.startsWith('(AUTO)')
-                              updateStep(section.id, step.id, { input: a ? v.replace('(AUTO)', '').trim() : v, auto: a })
-                            }}
+                            onChange={v => updateStepInput(section.id, step.id, v)}
                             placeholder="입력값 / 행동"
                             multiline
                             style={{ fontSize: 13, color: 'var(--text-secondary)' }} />
@@ -278,7 +275,7 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                               <TagChip key={tag} label={tag}
                                 onRemove={() => updateStep(section.id, step.id, { outputTags: (step.outputTags ?? []).filter(t => t !== tag) })} />
                             ))}
-                            <TagPicker
+                            <TagPicker kind="output"
                               tags={step.outputTags ?? []}
                               onChange={next => updateStep(section.id, step.id, { outputTags: next })} />
                           </div>

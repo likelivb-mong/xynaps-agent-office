@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { GameFlowSheet, GameFlowSection, GameStep } from '../../types'
 import { SearchIcon, LockIcon, ZapIcon } from '../ui/Icon'
+import { AUTO_INPUT_TAGS, inferInputTag } from './primitives'
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 export const PALETTES = [
@@ -86,6 +87,21 @@ export function useGameFlowEditing(sheet: GameFlowSheet, onChange: (sheet: GameF
           : s
       ),
     })
+  }
+  // IN PUT 텍스트 커밋 — 답 내용으로 자물쇠/입력 유형 태그를 자동 지정한다.
+  // 기존 자동 태그(Number/Alphabet/Keypad/X-kit)는 새 판별값으로 교체하고,
+  // 사용자가 직접 붙인 다른 태그(Device·MP3 등)는 건드리지 않는다.
+  function updateStepInput(secId: string, stepId: string, v: string) {
+    const a = v.startsWith('(AUTO)')
+    const input = a ? v.replace('(AUTO)', '').trim() : v
+    const step = sheet.sections.find(s => s.id === secId)?.steps.find(st => st.id === stepId)
+    let inputTags = step?.inputTags ?? []
+    const inferred = inferInputTag(input)
+    if (inferred) {
+      inputTags = inputTags.filter(t => !AUTO_INPUT_TAGS.includes(t))
+      inputTags = [...inputTags, inferred]
+    }
+    updateStep(secId, stepId, { input, auto: a, inputTags })
   }
   function addStep(secId: string) {
     const sec = sheet.sections.find(s => s.id === secId)!
@@ -261,7 +277,7 @@ export function useGameFlowEditing(sheet: GameFlowSheet, onChange: (sheet: GameF
     collapsed, toggleCollapse,
     hoveredRow, setHoveredRow,
     armedDragId, setArmedDragId, draggingStep, dragOver,
-    updateSection, updateStep, addStep, deleteStep, toggleStepFlag,
+    updateSection, updateStep, updateStepInput, addStep, deleteStep, toggleStepFlag,
     addSection, deleteSection, exportCSV,
     handleRowDragStart, handleRowDragOver, handleRowDrop,
     handleSectionDragOver, handleSectionDrop, clearDrag,

@@ -75,11 +75,20 @@ export function TogglePill({ value, onChange, col }: {
   )
 }
 
-// ── 분류 태그 (IN PUT / OUT PUT 공용) ───────────────────────────────────────
+// ── 분류 태그 (IN PUT / OUT PUT) ────────────────────────────────────────────
 // 노션 멀티셀렉트처럼 옵션 선택·생성·순서 편집·삭제. 색으로 구분해 표시한다.
-// 옵션 목록(순서 포함)은 localStorage 에 저장되어 모든 프로젝트에서 공유된다.
-const TAG_OPTIONS_LS_KEY = 'xynaps_gameflow_tag_options'
-const DEFAULT_TAG_OPTIONS = ['X-kit', 'Device', 'Keypad', 'Number', 'Alphabet', 'Key', 'Dial', 'ACTION', 'MP3', 'Video']
+// IN PUT 과 OUT PUT 은 서로 다른 옵션 목록을 갖는다(각각 localStorage 저장):
+// - IN PUT: 자물쇠/입력 유형 — 자동 태그(Number/Alphabet/Keypad/X-kit) 포함
+// - OUT PUT: 획득물 유형 — 자물쇠 답 유형(Number/Alphabet/Keypad)은 제외, Item 포함
+export type TagKind = 'input' | 'output'
+const TAG_OPTIONS_LS_KEYS: Record<TagKind, string> = {
+  input: 'xynaps_gameflow_tag_options_in',
+  output: 'xynaps_gameflow_tag_options_out',
+}
+const DEFAULT_TAG_OPTIONS: Record<TagKind, string[]> = {
+  input: ['X-kit', 'Device', 'Keypad', 'Number', 'Alphabet', 'Key', 'Dial', 'ACTION', 'MP3', 'Video'],
+  output: ['X-kit', 'Device', 'Key', 'Dial', 'ACTION', 'MP3', 'Video', 'Item'],
+}
 
 const TAG_COLOR_PRESETS: Record<string, { fg: string; bg: string }> = {
   'X-kit':    { fg: '#cbd5e1', bg: 'rgba(148,163,184,0.28)' },
@@ -92,22 +101,51 @@ const TAG_COLOR_PRESETS: Record<string, { fg: string; bg: string }> = {
   'ACTION':   { fg: '#fca5a5', bg: 'rgba(220,38,38,0.30)' },
   'MP3':      { fg: '#67e8f9', bg: 'rgba(6,182,212,0.26)' },
   'Video':    { fg: '#fdba74', bg: 'rgba(234,88,12,0.28)' },
+  'Item':     { fg: '#6ee7b7', bg: 'rgba(16,185,129,0.26)' },
 }
 const TAG_COLOR_CYCLE = Object.values(TAG_COLOR_PRESETS)
 
-export function loadTagOptions(): string[] {
+export function loadTagOptions(kind: TagKind): string[] {
   try {
-    const raw = localStorage.getItem(TAG_OPTIONS_LS_KEY)
+    const raw = localStorage.getItem(TAG_OPTIONS_LS_KEYS[kind])
     if (raw) {
       const arr = JSON.parse(raw)
       if (Array.isArray(arr) && arr.every(x => typeof x === 'string')) return arr
     }
   } catch { /* ignore */ }
-  return [...DEFAULT_TAG_OPTIONS]
+  return [...DEFAULT_TAG_OPTIONS[kind]]
 }
 
-function saveTagOptions(opts: string[]): void {
-  try { localStorage.setItem(TAG_OPTIONS_LS_KEY, JSON.stringify(opts)) } catch { /* ignore */ }
+function saveTagOptions(kind: TagKind, opts: string[]): void {
+  try { localStorage.setItem(TAG_OPTIONS_LS_KEYS[kind], JSON.stringify(opts)) } catch { /* ignore */ }
+}
+
+// ── IN PUT 자동 태그 추론 ────────────────────────────────────────────────────
+// 답 텍스트로 자물쇠/입력 유형을 자동 판별한다:
+// 한글 포함 → X-kit / 숫자 ≤4자리 → Number / 영문 ≤5자리 → Alphabet
+// 그 외 영숫자 ≤8자리 → Keypad / 8자리 초과 → X-kit
+export const AUTO_INPUT_TAGS = ['Number', 'Alphabet', 'Keypad', 'X-kit']
+export function inferInputTag(raw: string): string | null {
+  const v = raw.replace(/^\(AUTO\)/, '').trim()
+  if (!v) return null
+  if (/[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(v)) return 'X-kit'
+  // 구분 기호(공백·하이픈·쉼표 등)를 제거하고 실제 입력 자릿수만 센다
+  const compact = v.replace(/[\s\-–—·.,>/|]/g, '')
+  if (!compact) return null
+  if (/^\d+$/.test(compact)) {
+    if (compact.length <= 4) return 'Number'
+    if (compact.length <= 8) return 'Keypad'
+    return 'X-kit'
+  }
+  if (/^[A-Za-z]+$/.test(compact)) {
+    if (compact.length <= 5) return 'Alphabet'
+    if (compact.length <= 8) return 'Keypad'
+    return 'X-kit'
+  }
+  if (/^[A-Za-z0-9]+$/.test(compact)) {
+    return compact.length <= 8 ? 'Keypad' : 'X-kit'
+  }
+  return null // 그 외(특수문자 답 등)는 자동 지정하지 않음
 }
 
 export function outputTagColor(label: string): { fg: string; bg: string } {
@@ -139,7 +177,7 @@ export function TagChip({ label, onRemove }: { label: string; onRemove?: () => v
   )
 }
 
-export function TagPicker({ tags, onChange }: { tags: string[]; onChange: (next: string[]) => void }) {
+export function TagPicker({ tags, onChange, kind = 'output' }: { tags: string[]; onChange: (next: string[]) => void; kind?: TagKind }) {
   const [open, setOpen] = useState(false)
   const [manage, setManage] = useState(false)
   const [query, setQuery] = useState('')
@@ -154,7 +192,7 @@ export function TagPicker({ tags, onChange }: { tags: string[]; onChange: (next:
     setPos({ x: r.left, y: r.bottom + 4 })
     setQuery('')
     setManage(false)
-    setOptions(loadTagOptions())
+    setOptions(loadTagOptions(kind))
     setOpen(v => !v)
   }
 
@@ -179,7 +217,7 @@ export function TagPicker({ tags, onChange }: { tags: string[]; onChange: (next:
     if (!options.includes(label)) {
       const next = [...options, label]
       setOptions(next)
-      saveTagOptions(next)
+      saveTagOptions(kind, next)
     }
     if (!tags.includes(label)) onChange([...tags, label])
     setQuery('')
@@ -191,12 +229,12 @@ export function TagPicker({ tags, onChange }: { tags: string[]; onChange: (next:
     const next = [...options]
     ;[next[i], next[j]] = [next[j], next[i]]
     setOptions(next)
-    saveTagOptions(next)
+    saveTagOptions(kind, next)
   }
   function deleteOption(label: string) {
     const next = options.filter(o => o !== label)
     setOptions(next)
-    saveTagOptions(next)
+    saveTagOptions(kind, next)
   }
 
   const q = query.trim()
