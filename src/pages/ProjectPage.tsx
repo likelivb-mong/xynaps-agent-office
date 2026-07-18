@@ -233,6 +233,8 @@ export function ProjectPage() {
   const { requireConfirm, modal: costConfirmModal } = useCostConfirm()
   const [project, setProject] = useState<Project | null>(null)
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
+  // 게임플로우 저장 디바운스용 대기 상태 (handleGameFlowChange / flushGameFlowSave 참조)
+  const gameFlowSaveRef = useRef<{ timer: number | null; pid: string; vid: string; sheet: GameFlowSheet } | null>(null)
   const [running, setRunning] = useState(false)
   const [runningAgentId, setRunningAgentId] = useState<AgentId | null>(null)
   const [liveReports, setLiveReports] = useState<AgentReport[]>([])
@@ -289,6 +291,9 @@ export function ProjectPage() {
   }
 
   function reload() {
+    // 리로드 전에 미저장 게임플로우 편집을 먼저 저장해, 아래 storage 재읽기가
+    // 최신 편집을 덮어쓰지 않도록 한다 (Supabase 동기화 pull 시 유실 방지).
+    flushGameFlowSave()
     const p = getProjects().find(p => p.id === id)
     if (!p) { navigate('/'); return }
     setProject(p)
@@ -298,6 +303,16 @@ export function ProjectPage() {
   }
 
   useEffect(() => { reload() }, [id])
+
+  // 미저장 게임플로우 편집 플러시: 페이지 이탈(언마운트)·탭 종료 시 debounce 대기분 저장
+  useEffect(() => {
+    const onBeforeUnload = () => flushGameFlowSave()
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      flushGameFlowSave()
+    }
+  }, [])
 
   // 전역 저장 상태 구독 (피그마 스타일 상태 인디케이터)
   useEffect(() => onSaveStatus(setSaveStatus), [])
@@ -551,10 +566,37 @@ export function ProjectPage() {
     }
   }
 
+  // 게임플로우 저장 디바운스.
+  // 편집(타이핑·드래그)마다 프로젝트 전체를 LZ 압축+localStorage 저장하고 reload()로
+  // 전체를 다시 해제·파싱·리렌더하면 렉이 걸린다. 그래서 in-memory 상태는 즉시 갱신해
+  // 반응성을 확보하고, 실제 저장(압축·localStorage·Supabase)은 연속 편집을 묶어 처리한다.
+  function flushGameFlowSave() {
+    const pending = gameFlowSaveRef.current
+    if (!pending) return
+    if (pending.timer !== null) clearTimeout(pending.timer)
+    gameFlowSaveRef.current = null
+    updateVersionGameFlow(pending.pid, pending.vid, pending.sheet)
+  }
+
   function handleGameFlowChange(sheet: GameFlowSheet) {
     if (!project || !activeVersion) return
-    updateVersionGameFlow(project.id, activeVersion.id, sheet)
-    reload()
+    const pid = project.id
+    const vid = activeVersion.id
+    // 1) in-memory 즉시 반영 — storage 왕복·전체 리렌더 없이 반응성 확보
+    setProject(prev => prev && {
+      ...prev,
+      updatedAt: new Date().toISOString(),
+      versions: prev.versions.map(v => (v.id === vid ? { ...v, gameFlow: sheet } : v)),
+    })
+    // 2) 실제 저장은 debounce — 연속 편집을 한 번의 압축·저장으로 합친다
+    const existing = gameFlowSaveRef.current
+    if (existing?.timer != null) clearTimeout(existing.timer)
+    const timer = window.setTimeout(() => {
+      const p = gameFlowSaveRef.current
+      gameFlowSaveRef.current = null
+      if (p) updateVersionGameFlow(p.pid, p.vid, p.sheet)
+    }, 500)
+    gameFlowSaveRef.current = { timer, pid, vid, sheet }
   }
 
   function handleStoryBeatsChange(sheet: StoryBeatsSheet) {

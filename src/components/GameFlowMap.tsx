@@ -414,45 +414,53 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  const allSteps: StepWithContext[] = []
-  let gIdx = 0
-  for (const section of sheet.sections) {
-    let sectionMainIndex = 0
-    for (let i = 0; i < section.steps.length;) {
-      const first = section.steps[i]
-      const groupId = getStepGroupId(first)
-      let j = i + 1
-      while (j < section.steps.length && getStepGroupId(section.steps[j]) === groupId) j += 1
-      const groupSteps = section.steps.slice(i, j)
-      const pinSource = groupSteps.find(step => step.pinX !== undefined && step.pinY !== undefined) ?? groupSteps[0]
+  // 파생 데이터는 sheet 가 바뀔 때만 재계산한다. 이전에는 매 렌더(드래그 중 draft 갱신 포함)
+  // 마다 그룹핑 루프·필터·색상맵을 새로 돌려 렉의 원인이 되었다.
+  const allSteps: StepWithContext[] = useMemo(() => {
+    const result: StepWithContext[] = []
+    let gIdx = 0
+    for (const section of sheet.sections) {
+      let sectionMainIndex = 0
+      for (let i = 0; i < section.steps.length;) {
+        const first = section.steps[i]
+        const groupId = getStepGroupId(first)
+        let j = i + 1
+        while (j < section.steps.length && getStepGroupId(section.steps[j]) === groupId) j += 1
+        const groupSteps = section.steps.slice(i, j)
+        const pinSource = groupSteps.find(step => step.pinX !== undefined && step.pinY !== undefined) ?? groupSteps[0]
 
-      sectionMainIndex += 1
-      gIdx += 1
-      allSteps.push({
-        ...first,
-        xkit: groupSteps.some(step => step.xkit),
-        key: groupSteps.some(step => step.key),
-        dev: groupSteps.some(step => step.dev),
-        pinX: pinSource.pinX,
-        pinY: pinSource.pinY,
-        sectionTitle: section.title,
-        sectionId: section.id,
-        globalIndex: gIdx,
-        displayIndex: String(sectionMainIndex),
-        memberStepIds: groupSteps.map(step => step.id),
-      })
-      i = j
+        sectionMainIndex += 1
+        gIdx += 1
+        result.push({
+          ...first,
+          xkit: groupSteps.some(step => step.xkit),
+          key: groupSteps.some(step => step.key),
+          dev: groupSteps.some(step => step.dev),
+          pinX: pinSource.pinX,
+          pinY: pinSource.pinY,
+          sectionTitle: section.title,
+          sectionId: section.id,
+          globalIndex: gIdx,
+          displayIndex: String(sectionMainIndex),
+          memberStepIds: groupSteps.map(step => step.id),
+        })
+        i = j
+      }
     }
-  }
+    return result
+  }, [sheet.sections])
 
-  const placedSteps = allSteps.filter(s => s.pinX !== undefined && s.pinY !== undefined)
-  const unplacedSteps = allSteps.filter(s => s.pinX === undefined || s.pinY === undefined)
-  const sectionColorMap: Record<string, string> = {}
-  sheet.sections.forEach((sec, i) => {
-    sectionColorMap[sec.id] = SECTION_COLORS[i % SECTION_COLORS.length]
-  })
+  const placedSteps = useMemo(() => allSteps.filter(s => s.pinX !== undefined && s.pinY !== undefined), [allSteps])
+  const unplacedSteps = useMemo(() => allSteps.filter(s => s.pinX === undefined || s.pinY === undefined), [allSteps])
+  const sectionColorMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    sheet.sections.forEach((sec, i) => {
+      map[sec.id] = SECTION_COLORS[i % SECTION_COLORS.length]
+    })
+    return map
+  }, [sheet.sections])
 
-  const userFlow = buildUserFlow(sheet, projectName)
+  const userFlow = useMemo(() => buildUserFlow(sheet, projectName), [sheet, projectName])
   const isUserMode = mode === 'user'
 
   useEffect(() => {
