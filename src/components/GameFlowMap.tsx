@@ -1129,19 +1129,21 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                 const selectedSection = selectedSectionId === sec.id
                 const isShapeEditing = sectionCellEditMode !== null
                 const overlapArrows = (() => {
-                  const byCell = new Map<string, { cell: { x: number; y: number }; direction: ArrowDirection }>()
-                  const nextSection = sheet.sections[i + 1]
-                  if (!nextSection) return []
-                  const nextCells = getSectionCellSet(nextSection, i + 1)
-                  const nextCenter = getSectionCenter(nextCells)
-
-                  cells.forEach(k => {
-                    if (!nextCells.has(k) || byCell.has(k)) return
-                    const p = parseCellKey(k)
-                    const direction = getArrowDirection({ x: p.x + 0.5, y: p.y + 0.5 }, nextCenter)
-                    byCell.set(k, { cell: p, direction })
-                  })
-
+                  // 바로 다음 섹션뿐 아니라 '이후의 모든 섹션'과 겹치는 칸에 전환
+                  // 화살표를 그린다 (예: C가 E와 겹치면 C→E 화살표도 표시).
+                  // 순서가 빠른(가까운) 섹션과의 겹침이 우선한다.
+                  const byCell = new Map<string, { cell: { x: number; y: number }; direction: ArrowDirection; toIndex: number }>()
+                  for (let j = i + 1; j < sheet.sections.length; j += 1) {
+                    const otherCells = getSectionCellSet(sheet.sections[j], j)
+                    if (otherCells.size === 0) continue
+                    const otherCenter = getSectionCenter(otherCells)
+                    cells.forEach(k => {
+                      if (!otherCells.has(k) || byCell.has(k)) return
+                      const p = parseCellKey(k)
+                      const direction = getArrowDirection({ x: p.x + 0.5, y: p.y + 0.5 }, otherCenter)
+                      byCell.set(k, { cell: p, direction, toIndex: j })
+                    })
+                  }
                   return Array.from(byCell.values())
                 })()
                 return (
@@ -1280,7 +1282,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                           pointerEvents: 'none',
                           zIndex: 4,
                         }}
-                        title={`출구 방향: ${getSectionAlphaLabel(i)} → ${getSectionAlphaLabel(i + 1)}`}
+                        title={`출구 방향: ${getSectionAlphaLabel(i)} → ${getSectionAlphaLabel(item.toIndex)}`}
                       >
                         <span
                           style={{
