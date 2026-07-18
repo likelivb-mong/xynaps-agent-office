@@ -1023,7 +1023,9 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                             boxSizing: 'border-box',
                             cursor: 'move',
                             background: 'transparent',
-                            pointerEvents: 'auto',
+                            // 스텝 배치 중(selectedId)에는 대지가 클릭을 가로채지 않도록 통과시켜
+                            // 도면 위 어디든(대지 안 포함) 클릭해 핀을 배치할 수 있게 한다.
+                            pointerEvents: selectedId ? 'none' : 'auto',
                           }}
                         />
                       </>
@@ -1049,12 +1051,12 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                         background: selectedSection ? `${color}22` : 'rgba(0,0,0,0.35)',
                         border: `1px solid ${color}66`,
                         cursor: mode === 'path' ? 'move' : 'default',
-                        pointerEvents: 'auto',
+                        pointerEvents: selectedId ? 'none' : 'auto',
                       }}
                     >
                       {getSectionDisplayTitle(i, sec.title)}
                     </div>
-                    {selectedSection && (
+                    {selectedSection && !selectedId && (
                       <div
                         onMouseDown={e => {
                           startSectionBoxDrag(e, sec, i, 'resize', 'se')
@@ -1249,7 +1251,12 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                     return (
                       <div
                         key={step.id}
-                        onClick={() => setSelectedId(isSelected ? null : step.id)}
+                        onClick={() => {
+                          // 대지 클릭으로 남았을 수 있는 stale skip 플래그를 초기화해
+                          // 배치 첫 클릭이 먹히지 않도록 한다.
+                          skipNextMapClickRef.current = false
+                          setSelectedId(isSelected ? null : step.id)
+                        }}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 7,
                           padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
