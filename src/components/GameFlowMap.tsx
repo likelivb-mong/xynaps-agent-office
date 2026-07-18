@@ -674,19 +674,15 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     updateUserScreen(screenId, { imageDataUrl, imageName: file.name })
   }
 
-  function handleMapClick(e: React.MouseEvent<HTMLDivElement>) {
+  function handleMapClick() {
     if (draggingId || mode !== 'path') return
     if (skipNextMapClickRef.current) {
       skipNextMapClickRef.current = false
       return
     }
+    // 도면 클릭 배치는 제거됨(원래 섹션으로 clamp되어 엉뚱한 자리로 튀는 문제).
+    // 미배치 스텝은 상단 '섹션 선택' 버튼으로만 배치한다. 여기서는 섹션 선택 해제만.
     setSelectedSectionId(null)
-    if (!selectedId || !mapRef.current) return
-    const rect = mapRef.current.getBoundingClientRect()
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * 1000) / 10
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * 1000) / 10
-    updatePin(selectedId, x, y)
-    setSelectedId(null)
   }
 
   const handlePinMouseDown = useCallback((e: React.MouseEvent, stepId: string, pinX: number, pinY: number) => {
@@ -970,7 +966,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                     position: 'absolute',
                     inset: 0,
                     background: selectedId ? 'radial-gradient(circle, #1a2a3a 0%, #0d1117 100%)' : '#0d1117',
-                    cursor: sectionCellEditMode ? 'crosshair' : selectedId ? 'crosshair' : draggingId ? 'grabbing' : 'default',
+                    cursor: sectionCellEditMode ? 'crosshair' : draggingId ? 'grabbing' : 'default',
                     userSelect: 'none',
                   }}
                 >
@@ -1249,21 +1245,6 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                 )
               })}
 
-              {selectedId && (
-                <div style={{
-                  position: 'absolute', inset: 0,
-                  background: 'rgba(245,158,11,0.05)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  pointerEvents: 'none',
-                }}>
-                  <div style={{
-                    background: 'rgba(0,0,0,0.7)', borderRadius: 12,
-                    padding: '10px 20px', fontSize: 13, color: '#f59e0b', fontWeight: 600,
-                  }}>
-                    클릭하여 배치
-                  </div>
-                </div>
-              )}
                 </div>
               </div>
             </div>
