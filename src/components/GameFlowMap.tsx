@@ -33,6 +33,8 @@ const MAP_THEMES = {
     labelBg: 'rgba(0,0,0,0.35)',
     pinRing: '#0d1117', pinLightDisc: false,
     answerBg: '#1a1a2e', answerText: '#f0f0f5',
+    // 섹션 칸 채움 투명도(hex alpha 접미사). 어두운 배경에선 옅어도 잘 보인다.
+    cellFill: '0f', cellFillSelected: '16', cellFillView: '10', cellFillViewSelected: '14',
   },
   light: {
     surface: '#fbfcfe',
@@ -41,6 +43,8 @@ const MAP_THEMES = {
     labelBg: 'rgba(255,255,255,0.92)',
     pinRing: '#ffffff', pinLightDisc: true,
     answerBg: '#ffffff', answerText: '#1c2333',
+    // 흰 배경에서는 같은 투명도로는 색이 거의 안 보이므로 훨씬 진하게 채운다.
+    cellFill: '2e', cellFillSelected: '40', cellFillView: '26', cellFillViewSelected: '38',
   },
 } as const
 type MapThemeKey = keyof typeof MAP_THEMES
@@ -974,24 +978,28 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                 <button
                   onClick={toggleMapTheme}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)',
-                    color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 30, height: 30, padding: 0,
+                    border: '1px solid var(--border)', borderRadius: 9, background: 'var(--bg-card)',
+                    color: 'var(--text-muted)', cursor: 'pointer',
                   }}
-                  title="도면 배경 밝기 전환"
+                  aria-label={mapTheme === 'dark' ? 'Light mode' : 'Dark mode'}
+                  title={mapTheme === 'dark' ? 'Light mode' : 'Dark mode'}
                 >
-                  {mapTheme === 'dark' ? '☀ 밝은 도면' : '🌙 어두운 도면'}
+                  {mapTheme === 'dark' ? <SunIcon /> : <MoonIcon />}
                 </button>
                 <button
                   onClick={() => setShowPrint(true)}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-                    border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)',
-                    color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 30, height: 30, padding: 0,
+                    border: '1px solid var(--border)', borderRadius: 9, background: 'var(--bg-card)',
+                    color: 'var(--text-muted)', cursor: 'pointer',
                   }}
-                  title="인쇄용 정답지 미리보기"
+                  aria-label="Print"
+                  title="Print"
                 >
-                  🖨 인쇄
+                  <PrinterIcon />
                 </button>
               </div>
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-card)' }}>
@@ -1133,7 +1141,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                               width: `${SECTION_CELL_PCT_W}%`,
                               height: `${SECTION_CELL_PCT_H}%`,
                             border: `1px solid ${selectedSection ? color : `${color}55`}`,
-                            background: selectedSection ? `${color}16` : `${color}0f`,
+                            background: `${color}${selectedSection ? MT.cellFillSelected : MT.cellFill}`,
                             boxSizing: 'border-box',
                             pointerEvents: 'none',
                           }}
@@ -1153,7 +1161,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                                 top: `${p.y * SECTION_CELL_PCT_H}%`,
                                 width: `${SECTION_CELL_PCT_W}%`,
                                 height: `${SECTION_CELL_PCT_H}%`,
-                                background: selectedSection ? `${color}14` : `${color}10`,
+                                background: `${color}${selectedSection ? MT.cellFillViewSelected : MT.cellFillView}`,
                                 boxSizing: 'border-box',
                                 pointerEvents: 'none',
                               }}
@@ -2112,6 +2120,32 @@ function PhoneScreenCard({
         {`TAG ${tagNo}`}
       </div>
     </div>
+  )
+}
+
+// 단순한 2D 스트로크 아이콘 (텍스트 없는 아이콘 전용 버튼용)
+function SunIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M12 2.5v3M12 18.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+    </svg>
+  )
+}
+function MoonIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5Z" />
+    </svg>
+  )
+}
+function PrinterIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 9V3h12v6" />
+      <rect x="3.5" y="9" width="17" height="8" rx="1.5" />
+      <path d="M6 14h12v7H6z" />
+    </svg>
   )
 }
 
