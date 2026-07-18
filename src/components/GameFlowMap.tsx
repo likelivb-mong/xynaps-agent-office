@@ -424,6 +424,8 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
   const mapRef = useRef<HTMLDivElement>(null)
   const dragOffset = useRef({ x: 0, y: 0 })
   const sectionPaintRef = useRef<{ active: boolean; lastCell: string | null }>({ active: false, lastCell: null })
+  // 모양 편집 드래그 한 번이 잠근 대상 섹션 (클릭 지점에서 자동 인식)
+  const paintSectionRef = useRef<string | null>(null)
   const skipNextMapClickRef = useRef(false)
   const resizeRef = useRef<{ active: boolean; startY: number; startH: number; corner: string }>({ active: false, startY: 0, startH: 0, corner: '' })
 
@@ -782,41 +784,58 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
   }
 
   // 'painted' = 칠함 / 'skip' = 대상 아님(드래그 중 무시) / 'cancel' = 바탕 클릭 → 모드 종료 / 'none' = 편집 상태 아님
+  // 섹션을 미리 고를 필요 없이, 클릭한 칸이 속한(추가 모드는 인접 포함) 섹션을
+  // 자동 인식해 편집한다. 드래그 한 번(제스처)은 처음 잡은 섹션에 고정된다.
   function applySectionCellEditFromPointer(clientX: number, clientY: number, initial: boolean): 'painted' | 'skip' | 'cancel' | 'none' {
-    if (!sectionCellEditMode || !selectedSectionId || selectedId || !mapRef.current) return 'none'
+    if (!sectionCellEditMode || selectedId || !mapRef.current) return 'none'
     const rect = mapRef.current.getBoundingClientRect()
     const col = Math.max(0, Math.min(STUDIO_COLS - 1, Math.floor(((clientX - rect.left) / rect.width) * STUDIO_COLS)))
     const row = Math.max(0, Math.min(STUDIO_ROWS - 1, Math.floor(((clientY - rect.top) / rect.height) * STUDIO_ROWS)))
     const key = cellKey(col, row)
     if (sectionPaintRef.current.active && sectionPaintRef.current.lastCell === key) return 'painted'
 
-    // 선택 섹션과 무관한 격자 바탕을 클릭하면 편집을 종료한다.
-    // - 추가 모드: 섹션 칸이거나 그에 인접(8방향)한 칸만 유효
-    // - 제거 모드: 섹션 칸만 유효
-    const secIndex = sheet.sections.findIndex(sec => sec.id === selectedSectionId)
-    if (secIndex >= 0) {
-      const cells = getSectionCellSet(sheet.sections[secIndex], secIndex)
-      const inCells = cells.has(key)
-      let valid: boolean
-      if (sectionCellEditMode === 'add') {
-        let adjacent = inCells
-        if (!adjacent) {
-          for (let dx = -1; dx <= 1 && !adjacent; dx += 1) {
-            for (let dy = -1; dy <= 1 && !adjacent; dy += 1) {
-              if (dx === 0 && dy === 0) continue
-              if (cells.has(cellKey(col + dx, row + dy))) adjacent = true
-            }
-          }
+    const cellSetOf = (i: number) => getSectionCellSet(sheet.sections[i], i)
+    const isAdjacent = (cells: Set<string>) => {
+      if (cells.has(key)) return true
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          if (dx === 0 && dy === 0) continue
+          if (cells.has(cellKey(col + dx, row + dy))) return true
         }
-        valid = adjacent
-      } else {
-        valid = inCells
       }
-      if (!valid) return initial ? 'cancel' : 'skip'
+      return false
     }
 
+    // 제스처 대상 섹션: 첫 클릭에서 자동 인식하고 드래그 동안 고정
+    let targetId = paintSectionRef.current
+    if (initial) {
+      // 1) 칸을 소유한 섹션 (선택 섹션이 소유하면 그것 우선, 아니면 위에 그려진 것)
+      const owners = sheet.sections.filter((_sec, i) => cellSetOf(i).has(key))
+      if (owners.some(sec => sec.id === selectedSectionId)) targetId = selectedSectionId
+      else if (owners.length > 0) targetId = owners[owners.length - 1].id
+      // 2) 추가 모드: 인접(8방향) 섹션까지 허용
+      else if (sectionCellEditMode === 'add') {
+        const near = sheet.sections.filter((_sec, i) => isAdjacent(cellSetOf(i)))
+        if (near.some(sec => sec.id === selectedSectionId)) targetId = selectedSectionId
+        else targetId = near.length > 0 ? near[near.length - 1].id : null
+      } else {
+        targetId = null
+      }
+      if (!targetId) return 'cancel' // 어느 섹션과도 무관한 바탕 → 편집 종료
+      paintSectionRef.current = targetId
+      if (targetId !== selectedSectionId) setSelectedSectionId(targetId)
+    }
+    if (!targetId) return 'skip'
+
+    // 대상 섹션 기준 유효성: 추가 = 소유/인접, 제거 = 소유 칸만
+    const secIndex = sheet.sections.findIndex(sec => sec.id === targetId)
+    if (secIndex < 0) return 'skip'
+    const cells = cellSetOf(secIndex)
+    const valid = sectionCellEditMode === 'add' ? isAdjacent(cells) : cells.has(key)
+    if (!valid) return initial ? 'cancel' : 'skip'
+
     sectionPaintRef.current.lastCell = key
-    editSectionCell(selectedSectionId, col, row, sectionCellEditMode)
+    editSectionCell(targetId, col, row, sectionCellEditMode)
     return 'painted'
   }
 
@@ -839,6 +858,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     function onUp() {
       sectionPaintRef.current.active = false
       sectionPaintRef.current.lastCell = null
+      paintSectionRef.current = null
       endGesture()
       window.removeEventListener('mouseup', onUp)
     }
@@ -960,9 +980,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
               {sectionCellEditMode ? (
                 <span style={{ color: sectionCellEditMode === 'add' ? '#b6ff61' : '#ef4444', fontWeight: 700 }}>
-                  섹션 모양 {sectionCellEditMode === 'add' ? '추가' : '제거'} 모드 — {selectedSectionId
-                    ? '칸을 클릭·드래그하세요 · 바탕 클릭 또는 Esc로 종료'
-                    : '먼저 「섹션 선택」에서 편집할 섹션을 고르세요'}
+                  섹션 모양 {sectionCellEditMode === 'add' ? '추가' : '제거'} 모드 — 칸을 클릭·드래그하세요 <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>(클릭한 섹션 자동 선택 · 바탕 클릭/Esc 종료)</span>
                 </span>
               ) : selectedId ? (
                 <span style={{ color: '#f59e0b', fontWeight: 700 }}>선택한 스텝 — 배치할 섹션 버튼을 누르세요 ▶ <span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>(바탕 클릭 · Esc 취소)</span></span>
@@ -1111,19 +1129,21 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                 const selectedSection = selectedSectionId === sec.id
                 const isShapeEditing = sectionCellEditMode !== null
                 const overlapArrows = (() => {
-                  const byCell = new Map<string, { cell: { x: number; y: number }; direction: ArrowDirection }>()
-                  const nextSection = sheet.sections[i + 1]
-                  if (!nextSection) return []
-                  const nextCells = getSectionCellSet(nextSection, i + 1)
-                  const nextCenter = getSectionCenter(nextCells)
-
-                  cells.forEach(k => {
-                    if (!nextCells.has(k) || byCell.has(k)) return
-                    const p = parseCellKey(k)
-                    const direction = getArrowDirection({ x: p.x + 0.5, y: p.y + 0.5 }, nextCenter)
-                    byCell.set(k, { cell: p, direction })
-                  })
-
+                  // 바로 다음 섹션뿐 아니라 '이후의 모든 섹션'과 겹치는 칸에 전환
+                  // 화살표를 그린다 (예: C가 E와 겹치면 C→E 화살표도 표시).
+                  // 순서가 빠른(가까운) 섹션과의 겹침이 우선한다.
+                  const byCell = new Map<string, { cell: { x: number; y: number }; direction: ArrowDirection; toIndex: number }>()
+                  for (let j = i + 1; j < sheet.sections.length; j += 1) {
+                    const otherCells = getSectionCellSet(sheet.sections[j], j)
+                    if (otherCells.size === 0) continue
+                    const otherCenter = getSectionCenter(otherCells)
+                    cells.forEach(k => {
+                      if (!otherCells.has(k) || byCell.has(k)) return
+                      const p = parseCellKey(k)
+                      const direction = getArrowDirection({ x: p.x + 0.5, y: p.y + 0.5 }, otherCenter)
+                      byCell.set(k, { cell: p, direction, toIndex: j })
+                    })
+                  }
                   return Array.from(byCell.values())
                 })()
                 return (
@@ -1262,7 +1282,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                           pointerEvents: 'none',
                           zIndex: 4,
                         }}
-                        title={`출구 방향: ${getSectionAlphaLabel(i)} → ${getSectionAlphaLabel(i + 1)}`}
+                        title={`출구 방향: ${getSectionAlphaLabel(i)} → ${getSectionAlphaLabel(item.toIndex)}`}
                       >
                         <span
                           style={{
