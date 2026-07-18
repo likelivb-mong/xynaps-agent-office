@@ -727,7 +727,11 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     e.stopPropagation()
     e.preventDefault()
     if (!mapRef.current || mode !== 'path' || sectionCellEditMode) return
-    if (selectedSectionId !== section.id) return
+    // 핀 배치 중에는 대지 이동보다 핀 배치를 우선한다.
+    if (selectedId) return
+    // 미선택 대지를 클릭하면 곧바로 선택하고 같은 드래그로 이동을 시작한다.
+    // (이전에는 상단 '섹션 선택' 칩으로 먼저 골라야만 이동/리사이즈가 됐다)
+    if (selectedSectionId !== section.id) setSelectedSectionId(section.id)
     skipNextMapClickRef.current = true
 
     const rect = mapRef.current.getBoundingClientRect()
@@ -1017,7 +1021,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                             height: `${(box.h / STUDIO_ROWS) * 100}%`,
                             borderRadius: 4,
                             boxSizing: 'border-box',
-                            cursor: selectedSection ? 'move' : 'default',
+                            cursor: 'move',
                             background: 'transparent',
                             pointerEvents: 'auto',
                           }}
@@ -1044,7 +1048,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                         borderRadius: 6,
                         background: selectedSection ? `${color}22` : 'rgba(0,0,0,0.35)',
                         border: `1px solid ${color}66`,
-                        cursor: mode === 'path' && selectedSection ? 'move' : 'default',
+                        cursor: mode === 'path' ? 'move' : 'default',
                         pointerEvents: 'auto',
                       }}
                     >
