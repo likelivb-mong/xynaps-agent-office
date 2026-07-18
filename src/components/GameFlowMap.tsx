@@ -2425,7 +2425,15 @@ function PassMapPrintView({
                     <td style={{ padding: '3px 6px', fontWeight: 800, color }}>{si + 1}</td>
                     <td style={{ padding: '3px 6px', fontWeight: 700 }}>{step.clue || '—'}</td>
                     <td style={{ padding: '3px 6px', color: '#3a4356' }}>{step.input || '—'}</td>
-                    <td style={{ padding: '3px 6px', color: '#3a4356' }}>{step.output || '—'}</td>
+                    <td style={{ padding: '3px 6px', color: '#3a4356' }}>
+                      {(step.outputTags ?? []).map(tag => (
+                        <span key={tag} style={{
+                          display: 'inline-block', fontSize: 8.5, fontWeight: 800, color: '#3a4356',
+                          border: '1px solid #9aa4b5', borderRadius: 4, padding: '0 4px', marginRight: 3,
+                        }}>{tag}</span>
+                      ))}
+                      {step.output || '—'}
+                    </td>
                     <td style={{ padding: '3px 6px' }}>
                       {step.xkit && <span style={flagBadge('#fef3c7', '#b45309')}>XKIT</span>}
                       {step.key && <span style={flagBadge('#ccfbf1', '#0f766e')}>KEY</span>}

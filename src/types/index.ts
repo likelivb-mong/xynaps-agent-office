@@ -183,6 +183,7 @@ export interface GameStep {
   key: boolean
   dev: boolean
   output: string
+  outputTags?: string[]  // OUT PUT 분류 태그 (X-kit/Device/Keypad… 프리셋 + 커스텀)
   auto: boolean
   problemType: ProblemType
   note?: string

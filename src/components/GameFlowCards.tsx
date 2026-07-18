@@ -4,7 +4,7 @@ import {
   PALETTES, COL,
   getSectionAlphaLabel, computeStepLabels, useGameFlowEditing,
 } from './gameflow/editing'
-import { EditableCell, TogglePill, DragHandleDots } from './gameflow/primitives'
+import { EditableCell, TogglePill, DragHandleDots, OutputTagChip, OutputTagPicker } from './gameflow/primitives'
 
 // ── 작은 안쪽 화살표 아이콘 (In / Out 라벨용) ──────────────────────────────────
 function InArrow() {
@@ -262,6 +262,16 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                           <InArrow />Out
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* OUT PUT 분류 태그 (색 구분) */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.outputTags?.length ?? 0) > 0 ? 3 : 0, paddingTop: 4 }}>
+                            {(step.outputTags ?? []).map(tag => (
+                              <OutputTagChip key={tag} label={tag}
+                                onRemove={() => updateStep(section.id, step.id, { outputTags: (step.outputTags ?? []).filter(t => t !== tag) })} />
+                            ))}
+                            <OutputTagPicker
+                              tags={step.outputTags ?? []}
+                              onChange={next => updateStep(section.id, step.id, { outputTags: next })} />
+                          </div>
                           <EditableCell value={step.output}
                             onChange={v => updateStep(section.id, step.id, { output: v })}
                             placeholder="결과 / 열리는 것"
