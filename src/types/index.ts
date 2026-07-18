@@ -179,10 +179,12 @@ export interface GameStep {
   clue: string
   story?: string
   input: string
+  inputTags?: string[]   // IN PUT 분류 태그 (공용 태그 옵션 사용)
   xkit: boolean
   key: boolean
   dev: boolean
   output: string
+  outputTags?: string[]  // OUT PUT 분류 태그 (X-kit/Device/Keypad… 프리셋 + 커스텀)
   auto: boolean
   problemType: ProblemType
   note?: string

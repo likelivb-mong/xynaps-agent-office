@@ -39,6 +39,8 @@ interface Props {
   sections: SectionLite[]
   steps: StepLite[]
   onChangeUserFlow: (next: UserFlowConfig) => void
+  // 외부(폰 화면 hover 등)에서 특정 스텝을 강조할 때 그 스텝 id
+  highlightStepId?: string | null
 }
 
 const CANVAS_WIDTH = 2800
@@ -694,10 +696,13 @@ function layoutGraph(graph: UserJourneyGraph): UserJourneyGraph {
     : layoutGraphLinear(graph)
 }
 
-export function UserJourneyEditor({ userFlow, projectName, sections, steps, onChangeUserFlow }: Props) {
+export function UserJourneyEditor({ userFlow, projectName, sections, steps, onChangeUserFlow, highlightStepId }: Props) {
   const initializedRef = useRef(false)
   const boardRef = useRef<HTMLDivElement>(null)
   const initialCenterAppliedRef = useRef(false)
+  // 팬 성능용: 변환 레이어 DOM 직접 갱신 + 이동 중 최신 뷰포트 보관
+  const transformLayerRef = useRef<HTMLDivElement>(null)
+  const panLatestRef = useRef<UserJourneyViewport | null>(null)
 
   const graph = useMemo(() => buildBaseGraph(userFlow, sections, steps, projectName), [projectName, userFlow, sections, steps])
   const stepByIdLookup = useMemo(() => new Map(steps.map(step => [step.id, step])), [steps])
@@ -967,29 +972,38 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
     setPanState({ startX: e.clientX, startY: e.clientY, startViewport: viewport })
   }
 
+  // 팬(캔버스 이동)은 매 mousemove 마다 setViewport 하면 그리드/노드/엣지 전체가
+  // 리렌더되어 렉이 걸린다. 이동 중에는 변환 레이어 transform 만 ref 로 직접 갱신하고
+  // (React 리렌더 없음), 마우스를 놓을 때 한 번만 상태/저장에 반영한다.
   useEffect(() => {
+    if (!panState) return
     function onMove(ev: MouseEvent) {
-      if (panState) {
-        const dx = ev.clientX - panState.startX
-        const dy = ev.clientY - panState.startY
-        setViewport({ ...panState.startViewport, x: panState.startViewport.x + dx, y: panState.startViewport.y + dy })
+      const ps = panState!
+      const dx = ev.clientX - ps.startX
+      const dy = ev.clientY - ps.startY
+      const next = { ...ps.startViewport, x: ps.startViewport.x + dx, y: ps.startViewport.y + dy }
+      panLatestRef.current = next
+      if (transformLayerRef.current) {
+        transformLayerRef.current.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.zoom})`
       }
     }
-
     function onUp() {
-      if (panState) {
-        patchGraph(prev => ({ ...prev, viewport }))
-        setPanState(null)
+      const final = panLatestRef.current
+      panLatestRef.current = null
+      setPanState(null)
+      if (final) {
+        setViewport(final)
+        patchGraph(prev => ({ ...prev, viewport: final }))
       }
     }
-
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [panState, viewport])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panState])
 
   function onWheel(e: React.WheelEvent) {
     if (!boardRef.current) return
@@ -1485,7 +1499,7 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
           >
             {panelOpen ? '‹' : '›'}
           </button>
-          <div style={{
+          <div ref={transformLayerRef} style={{
             position: 'absolute',
             left: 0,
             top: 0,
@@ -1633,6 +1647,8 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
               const roomAlpha = node.type === 'room' && node.id.startsWith('section-')
                 ? sectionAlphaById.get(node.id.slice('section-'.length))
                 : undefined
+              // 폰 화면 hover 등 외부에서 지정한 스텝과 같은 노드 → "불이 들어오는" 강조
+              const extHighlighted = highlightStepId != null && node.sourceStepId != null && node.sourceStepId === highlightStepId
               return (
                 <div
                   key={node.id}
@@ -1645,13 +1661,16 @@ export function UserJourneyEditor({ userFlow, projectName, sections, steps, onCh
                     width: 164,
                     minHeight: 52,
                     borderRadius: 16,
-                    border: selected ? `2px solid ${baseColor}` : `1px solid ${baseColor}66`,
-                    background: selected ? `${baseColor}22` : nodeBg,
-                    boxShadow: selected ? `0 0 0 3px ${baseColor}30` : '0 10px 20px rgba(0,0,0,0.12)',
+                    border: extHighlighted ? `2px solid ${baseColor}` : selected ? `2px solid ${baseColor}` : `1px solid ${baseColor}66`,
+                    background: extHighlighted ? `${baseColor}33` : selected ? `${baseColor}22` : nodeBg,
+                    boxShadow: extHighlighted
+                      ? `0 0 0 4px ${baseColor}55, 0 0 22px ${baseColor}aa`
+                      : selected ? `0 0 0 3px ${baseColor}30` : '0 10px 20px rgba(0,0,0,0.12)',
                     padding: '8px 10px',
                     cursor: 'pointer',
                     userSelect: 'none',
                     color: nodeText,
+                    zIndex: extHighlighted ? 30 : undefined,
                     transition: 'box-shadow 0.15s, border-color 0.15s, background 0.15s',
                   }}
                 >

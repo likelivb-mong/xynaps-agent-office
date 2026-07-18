@@ -88,12 +88,14 @@ export function StoryBeatsTable({ sheet, onChange }: StoryBeatsTableProps) {
       </div>
 
       {/* ── 비트 테이블 ── */}
+      {/* 모바일: 컬럼을 짓누르는 대신 표에 최소 폭을 주고 가로 스크롤로 본다 */}
       <div style={{
         borderRadius: 14, border: '1px solid var(--border)',
-        overflow: 'hidden', boxShadow: '0 2px 16px rgba(0,0,0,0.25)',
+        overflowX: 'auto', boxShadow: '0 2px 16px rgba(0,0,0,0.25)',
         background: 'var(--bg-card)',
+        WebkitOverflowScrolling: 'touch',
       }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+        <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
           <thead>
             <tr>
               {[

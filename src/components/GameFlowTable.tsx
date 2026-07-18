@@ -5,7 +5,7 @@ import {
   PALETTES, COL,
   getSectionAlphaLabel, computeStepLabels, useGameFlowEditing,
 } from './gameflow/editing'
-import { EditableCell, TogglePill, DragHandleDots } from './gameflow/primitives'
+import { EditableCell, TogglePill, DragHandleDots, TagChip, TagPicker } from './gameflow/primitives'
 
 // ── Main ───────────────────────────────────────────────────────────────────
 interface GameFlowTableProps {
@@ -18,7 +18,7 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
     collapsed, toggleCollapse,
     hoveredRow, setHoveredRow,
     armedDragId, setArmedDragId, draggingStep, dragOver,
-    updateSection, updateStep, addStep, deleteStep, toggleStepFlag,
+    updateSection, updateStep, updateStepInput, addStep, deleteStep, toggleStepFlag,
     addSection, deleteSection, exportCSV,
     handleRowDragStart, handleRowDragOver, handleRowDrop,
     handleSectionDragOver, handleSectionDrop, clearDrag,
@@ -54,11 +54,13 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
       </div>
 
       {/* ── 테이블 ── */}
+      {/* 모바일: 컬럼을 짓누르는 대신 표에 최소 폭을 주고 가로 스크롤로 본다 */}
       <div style={{
         borderRadius: 14, border: '1px solid var(--border)',
-        overflow: 'hidden', boxShadow: '0 2px 16px rgba(0,0,0,0.25)',
+        overflowX: 'auto', boxShadow: '0 2px 16px rgba(0,0,0,0.25)',
+        WebkitOverflowScrolling: 'touch',
       }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr>
               {[
@@ -245,14 +247,20 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
                             style={isAuto ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined} />
                         </td>
 
-                        {/* IN PUT */}
+                        {/* IN PUT — 분류 태그(색 구분) + 자유 텍스트 */}
                         <td style={td(isLast)}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.inputTags?.length ?? 0) > 0 ? 3 : 0 }}>
+                            {(step.inputTags ?? []).map(tag => (
+                              <TagChip key={tag} label={tag}
+                                onRemove={() => updateStep(section.id, step.id, { inputTags: (step.inputTags ?? []).filter(t => t !== tag) })} />
+                            ))}
+                            <TagPicker kind="input"
+                              tags={step.inputTags ?? []}
+                              onChange={next => updateStep(section.id, step.id, { inputTags: next })} />
+                          </div>
                           <EditableCell
                             value={step.auto ? `(AUTO) ${step.input}` : step.input}
-                            onChange={v => {
-                              const a = v.startsWith('(AUTO)')
-                              updateStep(section.id, step.id, { input: a ? v.replace('(AUTO)', '').trim() : v, auto: a })
-                            }}
+                            onChange={v => updateStepInput(section.id, step.id, v)}
                             placeholder="입력값 / 행동"
                             multiline
                             style={isAuto ? { color: 'var(--text-muted)', fontStyle: 'italic' } : undefined} />
@@ -276,8 +284,17 @@ export function GameFlowTable({ sheet, onChange }: GameFlowTableProps) {
                           </td>
                         ))}
 
-                        {/* OUT PUT */}
+                        {/* OUT PUT — 분류 태그(색 구분) + 자유 텍스트 */}
                         <td style={td(isLast)}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.outputTags?.length ?? 0) > 0 ? 3 : 0 }}>
+                            {(step.outputTags ?? []).map(tag => (
+                              <TagChip key={tag} label={tag}
+                                onRemove={() => updateStep(section.id, step.id, { outputTags: (step.outputTags ?? []).filter(t => t !== tag) })} />
+                            ))}
+                            <TagPicker kind="output"
+                              tags={step.outputTags ?? []}
+                              onChange={next => updateStep(section.id, step.id, { outputTags: next })} />
+                          </div>
                           <EditableCell value={step.output}
                             onChange={v => updateStep(section.id, step.id, { output: v })}
                             placeholder="결과 / 열리는 것"

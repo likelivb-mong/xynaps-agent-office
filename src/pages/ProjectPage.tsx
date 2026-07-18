@@ -339,6 +339,15 @@ export function ProjectPage() {
 
   const activeVersion = project?.versions.find(v => v.id === activeVersionId) || null
 
+  // 프로젝트 진입 시 첫 화면: 보고서가 완료된 프로젝트는 '게임 플로우'로 연다.
+  // (아직 보고서가 없거나 생성 중인 프로젝트는 기본 'reports'가 협업/보고서 화면을 보여줌)
+  const didInitTabRef = useRef(false)
+  useEffect(() => {
+    if (didInitTabRef.current || !activeVersion) return
+    didInitTabRef.current = true
+    if ((activeVersion.agentReports?.length ?? 0) > 0) setActiveTab('gameflow')
+  }, [activeVersion])
+
   useEffect(() => {
     if (!project || !activeVersion) return
     setWorkspaceHistory(loadWorkspaceHistory(activeTab))
@@ -792,6 +801,8 @@ export function ProjectPage() {
   } : null
   const finalDetailSplit = displayFinalClean ? splitReportDetail(displayFinalClean.detail ?? '') : null
   const hasCompletedReports = (activeVersion?.agentReports?.length ?? 0) > 0
+  // '기본 정보' 상단 탭은 기본정보/초안/보고서 서브탭을 묶는 그룹이다.
+  const isInfoActive = activeTab === 'setup' || activeTab === 'draft' || activeTab === 'reports'
   const showSetupView = !running && activeTab === 'setup' && hasCompletedReports
   const showDraftView = !running && (
     activeVersion?.status === 'draft' ||
@@ -1153,34 +1164,46 @@ export function ProjectPage() {
       }}>
         {/* 탭 네비게이션 */}
         {hasCompletedReports && !running && (
-          <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid var(--border)', alignItems: 'stretch' }}>
-            <div style={{ display: 'flex', gap: 0 }}>
+          <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid var(--border)', alignItems: 'stretch', flexWrap: 'wrap', rowGap: 6 }}>
+            {/* 모바일: 탭 그룹만 가로 스크롤 (우측 저장/히스토리 클러스터는 줄바꿈 — 팝오버가 잘리지 않도록) */}
+            <div style={{ display: 'flex', gap: 0, overflowX: 'auto', scrollbarWidth: 'none', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
+              {/* 제작 파이프라인 순서: 기본 정보 → 게임 플로우 → 스튜디오. 회의실은 지원 도구라 맨 뒤 */}
               {[
-                { key: 'setup', label: '기본 정보', stale: false },
-                { key: 'draft', label: '초안', stale: false },
-                { key: 'reports', label: '보고서', stale: false },
-                { key: 'gameflow', label: '게임 플로우', stale: isGameFlowStale },
-                { key: 'workshop', label: '회의실', stale: false },
-                { key: 'studio', label: '스튜디오', stale: false },
-              ].map(tab => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key as 'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop')} style={{
-                  padding: '9px 16px', border: 'none', background: 'transparent',
-                  color: activeTab === tab.key ? 'var(--text-primary)' : 'var(--text-muted)',
-                  fontSize: 13, fontWeight: activeTab === tab.key ? 600 : 400,
-                  cursor: 'pointer',
-                  borderBottom: activeTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1, transition: 'color 0.15s',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}>
-                  {tab.label}
-                  {tab.stale && (
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%',
-                      background: 'var(--warning)', flexShrink: 0,
-                    }} />
-                  )}
-                </button>
-              ))}
+                { key: 'setup', label: '기본 정보', group: true, stale: false },
+                { key: 'gameflow', label: '게임 플로우', group: false, stale: isGameFlowStale },
+                { key: 'studio', label: '스튜디오', group: false, stale: false },
+                { key: 'workshop', label: '회의실', group: false, stale: false },
+              ].map(tab => {
+                const active = tab.group ? isInfoActive : activeTab === tab.key
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      // '기본 정보' 그룹 탭: 그룹 밖에서 누르면 첫 서브탭(기본정보)으로,
+                      // 이미 그룹 안이면 현재 서브탭을 유지한다.
+                      if (tab.group) { if (!isInfoActive) setActiveTab('setup') }
+                      else setActiveTab(tab.key as 'gameflow' | 'studio' | 'workshop')
+                    }}
+                    style={{
+                      padding: '9px 16px', border: 'none', background: 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                      fontSize: 13, fontWeight: active ? 600 : 400,
+                      cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                      borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+                      marginBottom: -1, transition: 'color 0.15s',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    {tab.label}
+                    {tab.stale && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: 'var(--warning)', flexShrink: 0,
+                      }} />
+                    )}
+                  </button>
+                )
+              })}
             </div>
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, position: 'relative', paddingRight: 2 }}>
@@ -1277,6 +1300,35 @@ export function ProjectPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* '기본 정보' 그룹 서브탭: 기본정보 / 초안 / 보고서 */}
+        {hasCompletedReports && !running && isInfoActive && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+            {[
+              { key: 'setup', label: '기본 정보' },
+              { key: 'draft', label: '초안' },
+              { key: 'reports', label: '보고서' },
+            ].map(sub => {
+              const active = activeTab === sub.key
+              return (
+                <button
+                  key={sub.key}
+                  onClick={() => setActiveTab(sub.key as 'setup' | 'draft' | 'reports')}
+                  style={{
+                    padding: '6px 14px', borderRadius: 999,
+                    border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: active ? 'var(--accent-dim)' : 'var(--bg-card)',
+                    color: active ? 'var(--accent)' : 'var(--text-muted)',
+                    fontSize: 12.5, fontWeight: active ? 700 : 500,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {sub.label}
+                </button>
+              )
+            })}
           </div>
         )}
 
@@ -2087,31 +2139,85 @@ export function ProjectPage() {
                         : '보고서 반영하기'
                   const dotColor = isGameFlowStale ? '#f59e0b' : syncedAt ? '#3fb950' : null
 
+                  // 파이프라인 단계. Step Table 과 Game Step 은 같은 시트를 편집하는
+                  // 연동 뷰라서 하나의 세그먼트 토글로 묶는다.
+                  const pipelineStages: Array<Array<{ key: 'beats' | 'table' | 'cards' | 'map' | 'user' | 'script'; label: string }>> = [
+                    [{ key: 'beats', label: 'Beat Sheet' }],
+                    [{ key: 'table', label: 'Step Table' }, { key: 'cards', label: 'Game Step' }],
+                    [{ key: 'map', label: 'Pass Map' }],
+                    [{ key: 'user', label: 'User Flow' }],
+                    ...(hasSurround ? [[{ key: 'script' as const, label: '🎧 Script' }]] : []),
+                  ]
                   return (
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 16, alignItems: 'center', overflow: 'visible', paddingBottom: 4 }}>
-                      {[
-                        { key: 'beats', label: 'Beat Sheet' },
-                        { key: 'table', label: 'Step Table' },
-                        { key: 'cards', label: 'Game Step' },
-                        { key: 'map', label: 'Pass Map' },
-                        { key: 'user', label: 'User Flow' },
-                        ...(hasSurround ? [{ key: 'script', label: '🎧 Script' }] : []),
-                      ].map((v, vi) => (
-                        <Fragment key={v.key}>
-                          {/* 파이프라인 단계 구분자 */}
-                          {vi > 0 && (
-                            <span style={{ color: 'var(--text-muted)', opacity: 0.35, fontSize: 12, userSelect: 'none', flexShrink: 0 }}>›</span>
-                          )}
-                          <button onClick={() => setGameflowView(v.key as 'beats' | 'table' | 'cards' | 'map' | 'user' | 'script')} style={{
-                            padding: '6px 14px', borderRadius: 8, border: 'none',
-                            background: gameflowView === v.key ? (v.key === 'script' ? '#8b5cf6' : 'var(--accent)') : 'var(--bg-card)',
-                            color: gameflowView === v.key ? (v.key === 'script' ? '#fff' : 'var(--accent-fg)') : v.key === 'script' ? '#a78bfa' : 'var(--text-muted)',
-                            fontSize: 12, fontWeight: gameflowView === v.key ? 700 : 400,
-                            cursor: 'pointer', transition: 'all 0.15s',
-                            outline: v.key === 'script' && gameflowView !== 'script' ? '1px solid rgba(167,139,250,0.3)' : 'none',
-                          }}>{v.label}</button>
-                        </Fragment>
-                      ))}
+                    // 모바일: 좁은 화면에서 잘리지 않도록 가로 스크롤 (스크롤바 숨김)
+                    <div style={{
+                      display: 'flex', gap: 6, marginBottom: 16, alignItems: 'center',
+                      overflowX: 'auto', overflowY: 'visible', padding: '2px 2px 6px 0',
+                      scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
+                    }}>
+                      {pipelineStages.map((stage, vi) => {
+                        const stageActive = stage.some(v => v.key === gameflowView)
+                        return (
+                          <Fragment key={stage[0].key}>
+                            {/* 파이프라인 단계 구분자 */}
+                            {vi > 0 && (
+                              <span style={{ color: 'var(--text-muted)', opacity: 0.35, fontSize: 12, userSelect: 'none', flexShrink: 0 }}>›</span>
+                            )}
+                            {stage.length === 1 ? (
+                              (() => {
+                                const v = stage[0]
+                                return (
+                                  <button onClick={() => setGameflowView(v.key)} style={{
+                                    padding: '6px 14px', borderRadius: 8, border: 'none', flexShrink: 0,
+                                    background: gameflowView === v.key ? (v.key === 'script' ? '#8b5cf6' : 'var(--accent)') : 'var(--bg-card)',
+                                    color: gameflowView === v.key ? (v.key === 'script' ? '#fff' : 'var(--accent-fg)') : v.key === 'script' ? '#a78bfa' : 'var(--text-muted)',
+                                    fontSize: 12, fontWeight: gameflowView === v.key ? 700 : 400,
+                                    cursor: 'pointer', transition: 'all 0.15s',
+                                    outline: v.key === 'script' && gameflowView !== 'script' ? '1px solid rgba(167,139,250,0.3)' : 'none',
+                                  }}>{v.label}</button>
+                                )
+                              })()
+                            ) : (
+                              // 연동 뷰 세그먼트 토글 (Step Table ⇄ Game Step)
+                              <div style={{
+                                display: 'inline-flex', flexShrink: 0, borderRadius: 8, overflow: 'hidden',
+                                border: stageActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                transition: 'border-color 0.15s',
+                              }}>
+                                {stage.map((v, si) => {
+                                  const active = gameflowView === v.key
+                                  return (
+                                    <button key={v.key} onClick={() => setGameflowView(v.key)} style={{
+                                      padding: '6px 13px', border: 'none',
+                                      borderLeft: si > 0 ? '1px solid var(--border)' : 'none',
+                                      background: active ? 'var(--accent)' : 'var(--bg-card)',
+                                      color: active ? 'var(--accent-fg)' : 'var(--text-muted)',
+                                      fontSize: 12, fontWeight: active ? 700 : 400,
+                                      cursor: 'pointer', transition: 'all 0.15s',
+                                    }}>{v.label}</button>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </Fragment>
+                        )
+                      })}
+
+                      {/* 다음 제작 단계: Pass Map 공간을 스튜디오(실제 배치·시뮬레이션)로 이어간다 */}
+                      <span style={{ color: 'var(--text-muted)', opacity: 0.35, fontSize: 12, userSelect: 'none', flexShrink: 0 }}>›</span>
+                      <button
+                        onClick={() => setActiveTab('studio')}
+                        title="다음 단계 — Pass Map 공간을 스튜디오에서 실제 배치·시뮬레이션으로 이어가기"
+                        style={{
+                          padding: '6px 13px', borderRadius: 8, flexShrink: 0,
+                          border: '1px dashed var(--border)', background: 'transparent',
+                          color: 'var(--text-muted)', fontSize: 12, fontWeight: 500,
+                          cursor: 'pointer', transition: 'all 0.15s',
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}
+                      >
+                        스튜디오 <span style={{ fontSize: 11 }}>↗</span>
+                      </button>
 
                       {/* 비트 뷰: 보고서 반영 + Step Table 반영 / 테이블·카드 뷰: 보고서 반영 / 맵 뷰: 테이블 반영 */}
                       {gameflowView === 'beats' ? (

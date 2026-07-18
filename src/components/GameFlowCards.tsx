@@ -4,7 +4,7 @@ import {
   PALETTES, COL,
   getSectionAlphaLabel, computeStepLabels, useGameFlowEditing,
 } from './gameflow/editing'
-import { EditableCell, TogglePill, DragHandleDots } from './gameflow/primitives'
+import { EditableCell, TogglePill, DragHandleDots, TagChip, TagPicker } from './gameflow/primitives'
 
 // ── 작은 안쪽 화살표 아이콘 (In / Out 라벨용) ──────────────────────────────────
 function InArrow() {
@@ -27,7 +27,7 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
     collapsed, toggleCollapse,
     hoveredRow, setHoveredRow,
     armedDragId, setArmedDragId, draggingStep, dragOver,
-    updateSection, updateStep, addStep, deleteStep, toggleStepFlag,
+    updateSection, updateStep, updateStepInput, addStep, deleteStep, toggleStepFlag,
     addSection, deleteSection, exportCSV,
     handleRowDragStart, handleRowDragOver, handleRowDrop,
     handleSectionDragOver, handleSectionDrop, clearDrag,
@@ -79,7 +79,8 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                 onDragOver={handleSectionDragOver}
                 onDrop={(e) => handleSectionDrop(e, section.id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
+                  // 모바일: 타이틀이 짓눌리지 않도록 뱃지/버튼이 다음 줄로 흐르게 한다
+                  display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
                   padding: '14px 18px',
                   background: pal.dim,
                   borderLeft: `4px solid ${pal.accent}`,
@@ -102,8 +103,8 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                   padding: '0 7px',
                 }}>{getSectionAlphaLabel(si)}</span>
 
-                {/* 타이틀 편집 */}
-                <div style={{ flex: 1, minWidth: 0 }}>
+                {/* 타이틀 편집 — 최소 폭을 확보해 좁은 화면에서 세로 짓눌림 방지 */}
+                <div style={{ flex: '1 1 160px', minWidth: 0 }}>
                   <EditableCell
                     value={section.title}
                     onChange={v => updateSection(section.id, { title: v })}
@@ -158,7 +159,8 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                     onMouseEnter={() => setHoveredRow(step.id)}
                     onMouseLeave={() => setHoveredRow(null)}
                     style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 12,
+                      // 모바일: 본문(단서/스토리/In·Out)이 짓눌리지 않게 토글·삭제가 다음 줄로 흐른다
+                      display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap',
                       padding: '14px 18px',
                       borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.05)',
                       background: isAuto
@@ -203,8 +205,8 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                       {stepLabels[step.id] ?? step.step}
                     </div>
 
-                    {/* 본문: 제목 + 설명 + In/Out */}
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {/* 본문: 제목 + 설명 + In/Out — 최소 폭 확보(좁으면 우측 토글이 줄바꿈) */}
+                    <div style={{ flex: '1 1 200px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {/* 제목 (Clue) */}
                       <EditableCell value={step.clue}
                         onChange={v => updateStep(section.id, step.id, { clue: v })}
@@ -238,12 +240,19 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                           <InArrow />In
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* IN PUT 분류 태그 (색 구분) */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.inputTags?.length ?? 0) > 0 ? 3 : 0, paddingTop: 4 }}>
+                            {(step.inputTags ?? []).map(tag => (
+                              <TagChip key={tag} label={tag}
+                                onRemove={() => updateStep(section.id, step.id, { inputTags: (step.inputTags ?? []).filter(t => t !== tag) })} />
+                            ))}
+                            <TagPicker kind="input"
+                              tags={step.inputTags ?? []}
+                              onChange={next => updateStep(section.id, step.id, { inputTags: next })} />
+                          </div>
                           <EditableCell
                             value={step.auto ? `(AUTO) ${step.input}` : step.input}
-                            onChange={v => {
-                              const a = v.startsWith('(AUTO)')
-                              updateStep(section.id, step.id, { input: a ? v.replace('(AUTO)', '').trim() : v, auto: a })
-                            }}
+                            onChange={v => updateStepInput(section.id, step.id, v)}
                             placeholder="입력값 / 행동"
                             multiline
                             style={{ fontSize: 13, color: 'var(--text-secondary)' }} />
@@ -260,6 +269,16 @@ export function GameFlowCards({ sheet, onChange }: GameFlowCardsProps) {
                           <InArrow />Out
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* OUT PUT 분류 태그 (색 구분) */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: (step.outputTags?.length ?? 0) > 0 ? 3 : 0, paddingTop: 4 }}>
+                            {(step.outputTags ?? []).map(tag => (
+                              <TagChip key={tag} label={tag}
+                                onRemove={() => updateStep(section.id, step.id, { outputTags: (step.outputTags ?? []).filter(t => t !== tag) })} />
+                            ))}
+                            <TagPicker kind="output"
+                              tags={step.outputTags ?? []}
+                              onChange={next => updateStep(section.id, step.id, { outputTags: next })} />
+                          </div>
                           <EditableCell value={step.output}
                             onChange={v => updateStep(section.id, step.id, { output: v })}
                             placeholder="결과 / 열리는 것"

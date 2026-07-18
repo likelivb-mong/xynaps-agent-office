@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams } from 'react-router-dom'
 import { getProjects } from '../lib/storage'
 import { safeGetItem, safeSetItem } from '../lib/storageCompression'
@@ -76,6 +77,162 @@ function persistSnapshot(projectId: string, snap: MapSnapshot, hist: HistoryEntr
   safeSetItem(getHistoryKey(projectId), JSON.stringify(next))
   return next
 }
+// ── 인쇄: 시공 도면 + 시공 목록(BOM) ─────────────────────────────────────────
+// 현장 시공·세팅용 문서. 도면 이미지(캔버스 캡처) + 배치 품목 수량 집계 +
+// 장치·트리거 규칙 요약을 A4 가로 한 문서로 출력한다.
+function StudioPrintView({
+  imageUrl, projectName, placedItems, devItems, devRules, marks, onClose,
+}: {
+  imageUrl: string
+  projectName?: string
+  placedItems: PItem[]
+  devItems: DevItem[]
+  devRules: DevRule[]
+  marks: PMark[]
+  onClose: () => void
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const CAT_KO: Record<string, string> = {
+    storage: '수납', tables: '테이블', chairs: '의자', appliances: '가전',
+    decor: '데코', bathroom: '욕실', kitchen: '주방', lock: '잠금장치', door: '문',
+  }
+  const DEV_KO: Record<string, string> = { eml: 'EM락', light: '조명', sound: '사운드', video: '비디오', trigger: '트리거' }
+
+  // 배치 품목 수량 집계 (분류 → 이름 → 수량)
+  const bom = (() => {
+    const map = new Map<string, { name: string; cat: string; count: number }>()
+    for (const p of placedItems) {
+      const item = ITEMS.find(i => i.id === p.itemId)
+      if (!item) continue
+      const cur = map.get(item.id)
+      if (cur) cur.count += 1
+      else map.set(item.id, { name: item.name, cat: CAT_KO[item.cat] ?? item.cat, count: 1 })
+    }
+    return Array.from(map.values()).sort((a, b) => a.cat.localeCompare(b.cat) || a.name.localeCompare(b.name))
+  })()
+  const devSummary = (() => {
+    const map = new Map<string, number>()
+    for (const d of devItems) map.set(d.type, (map.get(d.type) ?? 0) + 1)
+    return Array.from(map.entries()).map(([type, count]) => ({ label: DEV_KO[type] ?? type, count }))
+  })()
+  const printedAt = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  return (
+    <div
+      className="studio-print-root"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10000, overflow: 'auto',
+        background: '#ffffff', color: '#151a24', padding: '20px 28px 40px',
+      }}
+    >
+      <style>{`
+        @media print {
+          @page { size: A4 landscape; margin: 10mm; }
+          body * { visibility: hidden !important; }
+          .studio-print-root, .studio-print-root * { visibility: visible !important; }
+          .studio-print-root { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; height: auto !important; overflow: visible !important; padding: 0 !important; }
+          .studio-no-print { display: none !important; }
+          .studio-print-block { break-inside: avoid; }
+        }
+        .studio-print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      `}</style>
+
+      <div className="studio-no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #e3e7ee' }}>
+        <div style={{ fontSize: 14, fontWeight: 800 }}>인쇄 미리보기 — 스튜디오 시공 도면</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => window.print()}
+            style={{ padding: '8px 16px', borderRadius: 10, border: 'none', background: '#151a24', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+            🖨 인쇄하기
+          </button>
+          <button onClick={onClose}
+            style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid #d4dae4', background: '#fff', color: '#3a4356', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            닫기 (Esc)
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+        <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: -0.3 }}>
+          스튜디오 시공 도면{projectName ? ` · ${projectName}` : ''}
+        </div>
+        <div style={{ fontSize: 11, color: '#6b7280' }}>
+          배치 {placedItems.length}개 · 장치 {devItems.length}개 · 규칙 {devRules.length}개 · 마크 {marks.length}개 · 출력일 {printedAt}
+        </div>
+      </div>
+
+      <img src={imageUrl} alt="시공 도면" style={{ width: '100%', border: '1px solid #ccd3de', borderRadius: 8, display: 'block' }} />
+
+      <div style={{ display: 'flex', gap: 24, marginTop: 16, flexWrap: 'wrap' }}>
+        {/* 시공 목록 (BOM) */}
+        <div className="studio-print-block" style={{ flex: '1 1 320px' }}>
+          <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6, paddingBottom: 4, borderBottom: '1.5px solid #d4dae4' }}>
+            시공 목록 (총 {placedItems.length}개)
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5 }}>
+            <thead>
+              <tr style={{ color: '#4a5468', borderBottom: '1px solid #d4dae4' }}>
+                <th style={{ textAlign: 'left', padding: '3px 6px', width: 80 }}>분류</th>
+                <th style={{ textAlign: 'left', padding: '3px 6px' }}>품목</th>
+                <th style={{ textAlign: 'right', padding: '3px 6px', width: 50 }}>수량</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bom.length === 0 ? (
+                <tr><td colSpan={3} style={{ padding: '6px', color: '#9aa4b5' }}>배치된 품목이 없습니다</td></tr>
+              ) : bom.map(row => (
+                <tr key={`${row.cat}-${row.name}`} style={{ borderBottom: '1px solid #eceff4' }}>
+                  <td style={{ padding: '3px 6px', color: '#6b7280' }}>{row.cat}</td>
+                  <td style={{ padding: '3px 6px', fontWeight: 700 }}>{row.name}</td>
+                  <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 800 }}>{row.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 장치·트리거 요약 */}
+        <div className="studio-print-block" style={{ flex: '1 1 260px' }}>
+          <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6, paddingBottom: 4, borderBottom: '1.5px solid #d4dae4' }}>
+            장치 · 트리거
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5 }}>
+            <tbody>
+              {devSummary.length === 0 ? (
+                <tr><td style={{ padding: '6px', color: '#9aa4b5' }}>설치된 장치가 없습니다</td></tr>
+              ) : devSummary.map(d => (
+                <tr key={d.label} style={{ borderBottom: '1px solid #eceff4' }}>
+                  <td style={{ padding: '3px 6px', fontWeight: 700 }}>{d.label}</td>
+                  <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 800 }}>{d.count}개</td>
+                </tr>
+              ))}
+              {devRules.length > 0 && (
+                <tr>
+                  <td style={{ padding: '3px 6px', fontWeight: 700 }}>연동 규칙</td>
+                  <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 800 }}>{devRules.length}개</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {devRules.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              {devRules.map(rule => (
+                <div key={rule.uid} style={{ fontSize: 10, color: '#4a5468', padding: '2px 0', borderBottom: '1px dotted #eceff4' }}>
+                  <b>{rule.name || '규칙'}</b> — 입력 {rule.inputUids.length}개 (AND)
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface MItem { id: string; name: string; cat: Cat; w: number; h: number }
 interface DevItem {
   uid: string
@@ -2453,6 +2610,8 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
 
   const [mode, setMode] = useState<Mode>('edit')
   const [tool, setTool] = useState<Tool | null>(null)
+  // 인쇄(시공 도면) 미리보기 — 열 때 캔버스를 이미지로 캡처한다
+  const [printImage, setPrintImage] = useState<string | null>(null)
   const [eraseMode, setEraseMode] = useState(false)
   const [floorType, setFloorType] = useState(1)
   const [wallType, setWallType] = useState(5)
@@ -2734,6 +2893,40 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     setTimeout(() => setSaveStatus('idle'), 1800)
   }
 
+  // ── 자동 저장 ──
+  // 편집(타일·배치·마크·장치·규칙·테마) 변경을 디바운스로 맵 키에 저장한다.
+  // 히스토리는 쌓지 않는다 — 수동 '저장' 버튼만 체크포인트를 남긴다.
+  const [dirtyTick, setDirtyTick] = useState(0)
+  const autosaveSkipRef = useRef(true)
+  const writeSnapshotSilent = useCallback(() => {
+    if (!projectId) return
+    const snap: MapSnapshot = {
+      tiles: tilesRef.current.map(row => [...row]),
+      placedItems: placedRef.current,
+      marks: marksRef.current,
+      devItems: devRef.current,
+      devRules: devRulesRef.current,
+      gridTheme: gridThemeRef.current,
+    }
+    safeSetItem(getMapKey(projectId), JSON.stringify(snap))
+  }, [projectId])
+
+  useEffect(() => {
+    // 최초 로드(스냅샷 복원 포함) 직후에는 저장하지 않는다
+    if (autosaveSkipRef.current) { autosaveSkipRef.current = false; return }
+    const t = window.setTimeout(writeSnapshotSilent, 1500)
+    return () => window.clearTimeout(t)
+  }, [dirtyTick, placedItems, marks, devItems, devRules, gridTheme, writeSnapshotSilent])
+
+  // 페이지 이탈(언마운트)·탭 종료 시에도 유실 없이 저장
+  useEffect(() => {
+    window.addEventListener('beforeunload', writeSnapshotSilent)
+    return () => {
+      window.removeEventListener('beforeunload', writeSnapshotSilent)
+      writeSnapshotSilent()
+    }
+  }, [writeSnapshotSilent])
+
   // ── Restore from history ──
   function handleRestore(entry: HistoryEntry) {
     const snap = entry.snapshot
@@ -2793,11 +2986,17 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     }
   }
 
-  // R key → rotate, F key → flip in edit mode
+  // R key → rotate, F key → flip in edit mode / Esc → 진행 중인 모드·선택 단계 취소
   useEffect(() => {
     if (mode !== 'edit') return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setEraseMode(false)
+      if (e.key === 'Escape') {
+        // 우선순위: 지우개 → 도구/아이템 선택 → 마크 선택 → 배치물 선택
+        if (eraseMode) setEraseMode(false)
+        else if (tool) { setTool(null); setSelItem(null) }
+        else if (selMarkUid) setSelMarkUid(null)
+        else if (selPlacedUid) setSelPlacedUid(null)
+      }
       if ((e.key === 'r' || e.key === 'R') && tool === 'place') {
         setRotation(r => ((r + 1) % 4) as 0|1|2|3)
       }
@@ -2807,7 +3006,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode, tool])
+  }, [mode, tool, eraseMode, selMarkUid, selPlacedUid])
 
   useEffect(() => {
     if (mode === 'play') setEraseMode(false)
@@ -3159,6 +3358,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     const rows = tilesRef.current.map(row => [...row])
     rows[gy][gx] = eraseMode ? 0 : tool === 'wall' ? wallTypeRef.current : floorType
     tilesRef.current = rows
+    setDirtyTick(t => t + 1) // 타일은 ref 라 자동저장 트리거를 직접 알린다
     renderAll()
   }
 
@@ -3588,6 +3788,7 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
     const rows = tilesRef.current.map(row => [...row])
     rows[cell.y][cell.x] = 0
     tilesRef.current = rows
+    setDirtyTick(t => t + 1)
     renderAll()
   }
 
@@ -3836,6 +4037,32 @@ export function MetaStudio({ gameFlowSheet, showEmbeddedSaveHistory = true }: Me
                   {gridTheme === 'dark' ? <SunIcon width={13} height={13} /> : <MoonIcon width={13} height={13} />}
                 </span>
               </button>
+              {/* 인쇄 — 시공 도면 + 시공 목록 */}
+              <button
+                onClick={() => { const c = canvasRef.current; if (c) setPrintImage(c.toDataURL('image/png')) }}
+                title="Print — 시공 도면·시공 목록 인쇄"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 32, height: 32, padding: 0, borderRadius: 7, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                  color: 'var(--text-muted)',
+                }}>
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9V3h12v6" /><rect x="3.5" y="9" width="17" height="8" rx="1.5" /><path d="M6 14h12v7H6z" />
+                </svg>
+              </button>
+              {printImage && createPortal(
+                <StudioPrintView
+                  imageUrl={printImage}
+                  projectName={getProjects().find(p => p.id === projectId)?.name}
+                  placedItems={placedItems}
+                  devItems={devItems}
+                  devRules={devRules}
+                  marks={marks}
+                  onClose={() => setPrintImage(null)}
+                />,
+                document.body
+              )}
               <button onClick={() => {
                 let sx = -1, sy = -1
                 outer: for (let gy = 0; gy < ROWS; gy++) {
