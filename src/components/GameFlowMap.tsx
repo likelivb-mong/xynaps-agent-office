@@ -1561,6 +1561,8 @@ function UserFlowPanel({
   onUploadScreen: (screenId: string, file: File | null) => Promise<void>
 }) {
   const [previewScreenId, setPreviewScreenId] = useState<string | null>(null)
+  // 폰 화면 hover 시 루트 가지(여정) 도면에서 같은 스텝 노드를 강조하기 위한 공유 상태
+  const [highlightStepId, setHighlightStepId] = useState<string | null>(null)
   const previewScreen = useMemo(
     () => userFlow.screens.find(screen => screen.id === previewScreenId) ?? null,
     [previewScreenId, userFlow.screens]
@@ -1677,6 +1679,7 @@ function UserFlowPanel({
       <UserJourneyEditor
         userFlow={userFlow}
         projectName={projectName}
+        highlightStepId={highlightStepId}
         sections={sections}
         steps={allSteps.map(step => ({
           id: step.id,
@@ -1743,6 +1746,7 @@ function UserFlowPanel({
                         onUpdate={onUpdateScreen}
                         onToggleAnswerContinuation={toggleAnswerContinuation}
                         onOpenPreview={setPreviewScreenId}
+                        onHighlightStep={setHighlightStepId}
                         onUpload={onUploadScreen}
                         merged
                         tagNo={item.tagNo}
@@ -1775,6 +1779,7 @@ function UserFlowPanel({
                   onUpdate={onUpdateScreen}
                   onToggleAnswerContinuation={toggleAnswerContinuation}
                   onOpenPreview={setPreviewScreenId}
+                  onHighlightStep={setHighlightStepId}
                   onUpload={onUploadScreen}
                   tagNo={item.tagNo}
                 />
@@ -1872,6 +1877,7 @@ function PhoneScreenCard({
   onToggleAnswerContinuation,
   onOpenPreview,
   onUpload,
+  onHighlightStep,
   merged = false,
   tagNo,
 }: {
@@ -1881,6 +1887,7 @@ function PhoneScreenCard({
   onToggleAnswerContinuation: (screenId: string, enabled: boolean) => void
   onOpenPreview: (screenId: string) => void
   onUpload: (screenId: string, file: File | null) => Promise<void>
+  onHighlightStep?: (stepId: string | null) => void
   merged?: boolean
   tagNo: number
 }) {
@@ -1896,20 +1903,23 @@ function PhoneScreenCard({
   const canEditSubtypeBadge = screen.screenKind === 'xkit-answer'
 
   return (
-    <div style={{
-      minWidth: 320,
-      maxWidth: 340,
-      minHeight: 860,
-      borderRadius: 22,
-      border: merged ? 'none' : '1px solid var(--border)',
-      background: merged ? 'transparent' : 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(8,10,14,0.94) 100%)',
-      padding: merged ? 0 : 14,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 12,
-      position: 'relative',
-      paddingBottom: merged ? 26 : 40,
-    }}>
+    <div
+      onMouseEnter={() => { if (screen.linkedStepId) onHighlightStep?.(screen.linkedStepId) }}
+      onMouseLeave={() => onHighlightStep?.(null)}
+      style={{
+        minWidth: 320,
+        maxWidth: 340,
+        minHeight: 860,
+        borderRadius: 22,
+        border: merged ? 'none' : '1px solid var(--border)',
+        background: merged ? 'transparent' : 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(8,10,14,0.94) 100%)',
+        padding: merged ? 0 : 14,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        position: 'relative',
+        paddingBottom: merged ? 26 : 40,
+      }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <input
           value={screen.title}
