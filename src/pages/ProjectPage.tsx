@@ -1158,11 +1158,12 @@ export function ProjectPage() {
           <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid var(--border)', alignItems: 'stretch', flexWrap: 'wrap', rowGap: 6 }}>
             {/* 모바일: 탭 그룹만 가로 스크롤 (우측 저장/히스토리 클러스터는 줄바꿈 — 팝오버가 잘리지 않도록) */}
             <div style={{ display: 'flex', gap: 0, overflowX: 'auto', scrollbarWidth: 'none', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
+              {/* 제작 파이프라인 순서: 기본 정보 → 게임 플로우 → 스튜디오. 회의실은 지원 도구라 맨 뒤 */}
               {[
                 { key: 'setup', label: '기본 정보', group: true, stale: false },
                 { key: 'gameflow', label: '게임 플로우', group: false, stale: isGameFlowStale },
-                { key: 'workshop', label: '회의실', group: false, stale: false },
                 { key: 'studio', label: '스튜디오', group: false, stale: false },
+                { key: 'workshop', label: '회의실', group: false, stale: false },
               ].map(tab => {
                 const active = tab.group ? isInfoActive : activeTab === tab.key
                 return (
@@ -2192,6 +2193,22 @@ export function ProjectPage() {
                           </Fragment>
                         )
                       })}
+
+                      {/* 다음 제작 단계: Pass Map 공간을 스튜디오(실제 배치·시뮬레이션)로 이어간다 */}
+                      <span style={{ color: 'var(--text-muted)', opacity: 0.35, fontSize: 12, userSelect: 'none', flexShrink: 0 }}>›</span>
+                      <button
+                        onClick={() => setActiveTab('studio')}
+                        title="다음 단계 — Pass Map 공간을 스튜디오에서 실제 배치·시뮬레이션으로 이어가기"
+                        style={{
+                          padding: '6px 13px', borderRadius: 8, flexShrink: 0,
+                          border: '1px dashed var(--border)', background: 'transparent',
+                          color: 'var(--text-muted)', fontSize: 12, fontWeight: 500,
+                          cursor: 'pointer', transition: 'all 0.15s',
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}
+                      >
+                        스튜디오 <span style={{ fontSize: 11 }}>↗</span>
+                      </button>
 
                       {/* 비트 뷰: 보고서 반영 + Step Table 반영 / 테이블·카드 뷰: 보고서 반영 / 맵 뷰: 테이블 반영 */}
                       {gameflowView === 'beats' ? (
