@@ -339,6 +339,15 @@ export function ProjectPage() {
 
   const activeVersion = project?.versions.find(v => v.id === activeVersionId) || null
 
+  // 프로젝트 진입 시 첫 화면: 보고서가 완료된 프로젝트는 '게임 플로우'로 연다.
+  // (아직 보고서가 없거나 생성 중인 프로젝트는 기본 'reports'가 협업/보고서 화면을 보여줌)
+  const didInitTabRef = useRef(false)
+  useEffect(() => {
+    if (didInitTabRef.current || !activeVersion) return
+    didInitTabRef.current = true
+    if ((activeVersion.agentReports?.length ?? 0) > 0) setActiveTab('gameflow')
+  }, [activeVersion])
+
   useEffect(() => {
     if (!project || !activeVersion) return
     setWorkspaceHistory(loadWorkspaceHistory(activeTab))
