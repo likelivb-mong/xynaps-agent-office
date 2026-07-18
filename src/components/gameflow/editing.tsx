@@ -208,7 +208,10 @@ export function useGameFlowEditing(sheet: GameFlowSheet, onChange: (sheet: GameF
     if (selected.length === 1 && selected[0] === field) return
 
     const groupId = step.stepGroup ?? crypto.randomUUID()
-    const mergedFlags = FLAG_FIELDS.filter(flag => selected.includes(flag) || flag === field)
+    // 새로 선택한 플래그(field)를 마지막 하위(예: 1-2)로 붙인다.
+    // 기존 플래그는 원래 순서를 유지해 원본이 1-1로 남는다.
+    // (이전엔 FLAG_FIELDS 고정 순서라, 새로 고른 게 순서상 앞이면 1-1로 가버렸다)
+    const mergedFlags = [...selected, field]
     const replacement = mergedFlags.map((flag, rowIndex) => ({
       ...step,
       id: rowIndex === 0 ? step.id : crypto.randomUUID(),
