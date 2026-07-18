@@ -522,6 +522,51 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
     })
   }
 
+  // '섹션 선택' 버튼으로 배치: 선택한 미배치 스텝을 해당 섹션 '중앙'에 정확히 배치한다.
+  // 도면 클릭 방식은 스텝이 원래 속한 섹션으로 clamp 되어 엉뚱한 자리로 튀는 문제가 있어,
+  // 섹션 버튼을 누르면 그 섹션으로 (필요 시 이동시켜) 중앙에 확실히 배치되게 한다.
+  function placeStepInSection(stepId: string, targetSectionId: string) {
+    const target = allSteps.find(step => step.id === stepId)
+    if (!target) return
+    const memberIds = new Set(target.memberStepIds ?? [stepId])
+    const targetIndex = sheet.sections.findIndex(sec => sec.id === targetSectionId)
+    if (targetIndex < 0) return
+
+    const targetSec = sheet.sections[targetIndex]
+    const cells = getSectionCellSet(targetSec, targetIndex)
+    const box = getSectionMapBox(targetSec, targetIndex)
+    // 섹션 박스 중앙(%) → 실제 셀 중앙으로 스냅 (자유 모양 섹션도 유효 위치 보장)
+    const centerX = ((box.x + box.w / 2) / STUDIO_COLS) * 100
+    const centerY = ((box.y + box.h / 2) / STUDIO_ROWS) * 100
+    const { pinX, pinY } = clampPinToSectionCells(centerX, centerY, cells, box)
+
+    if (target.sectionId === targetSectionId) {
+      // 이미 그 섹션 소속 → 순서 유지한 채 핀만 중앙으로 설정
+      updateSheet({
+        ...sheet,
+        sections: sheet.sections.map(sec => ({
+          ...sec,
+          steps: sec.steps.map(step => (memberIds.has(step.id) ? { ...step, pinX, pinY } : step)),
+        })),
+      })
+    } else {
+      // 다른 섹션 → 그룹 스텝을 대상 섹션으로 이동시키고 중앙에 배치
+      const movingSteps = (sheet.sections.find(sec => sec.id === target.sectionId)?.steps ?? [])
+        .filter(step => memberIds.has(step.id))
+        .map(step => ({ ...step, pinX, pinY }))
+      updateSheet({
+        ...sheet,
+        sections: sheet.sections.map(sec => {
+          if (sec.id === target.sectionId) return { ...sec, steps: sec.steps.filter(step => !memberIds.has(step.id)) }
+          if (sec.id === targetSectionId) return { ...sec, steps: [...sec.steps, ...movingSteps] }
+          return sec
+        }),
+      })
+    }
+    setSelectedId(null)
+    setSelectedSectionId(targetSectionId)
+  }
+
   function updateSectionMapBox(
     sectionId: string,
     nextBox: { x: number; y: number; w: number; h: number },
@@ -814,7 +859,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
           <span style={{ color: mode === 'path' ? 'var(--text-muted)' : '#9fb3ff' }}>
             {mode === 'path'
               ? selectedId
-                ? '도면을 클릭해 스텝을 배치하세요'
+                ? '상단 「섹션 선택」에서 섹션 버튼을 눌러 그 섹션 중앙에 배치하세요'
                 : '핀 드래그로 이동 · 더블클릭으로 제거'
               : '게임 플로우를 유저 여정과 Xkit 화면 흐름으로 연결해 편집하세요'}
           </span>
@@ -825,7 +870,7 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              {selectedId && <span style={{ color: '#f59e0b', fontWeight: 700 }}>선택한 스텝을 도면 위에 배치 중</span>}
+              {selectedId && <span style={{ color: '#f59e0b', fontWeight: 700 }}>선택한 스텝 — 배치할 섹션 버튼을 누르세요 ▶</span>}
               {!selectedId && unplacedSteps.length > 0 && <span>아래 미배치 스텝을 클릭해 배치할 수 있습니다</span>}
               {unplacedSteps.length === 0 && <span style={{ color: '#00d4aa' }}>모든 스텝이 배치되었습니다</span>}
             </div>
@@ -865,25 +910,35 @@ export function GameFlowMap({ sheet: savedSheet, onChange, mode = 'path', projec
                 {sheet.sections.map((sec, i) => (
                   <button
                     key={sec.id}
-                    onClick={() => setSelectedSectionId(prev => (prev === sec.id ? null : sec.id))}
+                    onClick={() => {
+                      // 미배치 스텝이 선택된 상태면, 이 섹션 버튼은 '그 섹션 중앙에 배치' 동작을 한다.
+                      if (selectedId) { placeStepInSection(selectedId, sec.id); return }
+                      setSelectedSectionId(prev => (prev === sec.id ? null : sec.id))
+                    }}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
                       borderRadius: 999,
-                      border: `1px solid ${SECTION_COLORS[i % SECTION_COLORS.length]}66`,
-                      background: selectedSectionId === sec.id
+                      // 배치 대기(selectedId) 중에는 모든 섹션 버튼을 '배치 타겟'으로 강조한다.
+                      border: selectedId
+                        ? `1px solid ${SECTION_COLORS[i % SECTION_COLORS.length]}`
+                        : `1px solid ${SECTION_COLORS[i % SECTION_COLORS.length]}66`,
+                      background: selectedId
                         ? `${SECTION_COLORS[i % SECTION_COLORS.length]}22`
-                        : 'rgba(255,255,255,0.03)',
-                      color: selectedSectionId === sec.id
+                        : selectedSectionId === sec.id
+                          ? `${SECTION_COLORS[i % SECTION_COLORS.length]}22`
+                          : 'rgba(255,255,255,0.03)',
+                      color: selectedId || selectedSectionId === sec.id
                         ? SECTION_COLORS[i % SECTION_COLORS.length]
                         : 'var(--text-muted)',
                       fontSize: 10,
-                      fontWeight: selectedSectionId === sec.id ? 700 : 500,
+                      fontWeight: selectedId || selectedSectionId === sec.id ? 700 : 500,
                       padding: '3px 8px',
                       cursor: 'pointer',
+                      boxShadow: selectedId ? `0 0 0 2px ${SECTION_COLORS[i % SECTION_COLORS.length]}33` : 'none',
                     }}
-                    title="편집 대상 섹션 선택"
+                    title={selectedId ? '이 섹션 중앙에 스텝 배치' : '편집 대상 섹션 선택'}
                   >
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: SECTION_COLORS[i % SECTION_COLORS.length], flexShrink: 0 }} />
                     <span>{getSectionDisplayTitle(i, sec.title)}</span>
