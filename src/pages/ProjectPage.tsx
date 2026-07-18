@@ -792,6 +792,8 @@ export function ProjectPage() {
   } : null
   const finalDetailSplit = displayFinalClean ? splitReportDetail(displayFinalClean.detail ?? '') : null
   const hasCompletedReports = (activeVersion?.agentReports?.length ?? 0) > 0
+  // '기본 정보' 상단 탭은 기본정보/초안/보고서 서브탭을 묶는 그룹이다.
+  const isInfoActive = activeTab === 'setup' || activeTab === 'draft' || activeTab === 'reports'
   const showSetupView = !running && activeTab === 'setup' && hasCompletedReports
   const showDraftView = !running && (
     activeVersion?.status === 'draft' ||
@@ -1156,31 +1158,41 @@ export function ProjectPage() {
           <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid var(--border)', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 0 }}>
               {[
-                { key: 'setup', label: '기본 정보', stale: false },
-                { key: 'draft', label: '초안', stale: false },
-                { key: 'reports', label: '보고서', stale: false },
-                { key: 'gameflow', label: '게임 플로우', stale: isGameFlowStale },
-                { key: 'workshop', label: '회의실', stale: false },
-                { key: 'studio', label: '스튜디오', stale: false },
-              ].map(tab => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key as 'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop')} style={{
-                  padding: '9px 16px', border: 'none', background: 'transparent',
-                  color: activeTab === tab.key ? 'var(--text-primary)' : 'var(--text-muted)',
-                  fontSize: 13, fontWeight: activeTab === tab.key ? 600 : 400,
-                  cursor: 'pointer',
-                  borderBottom: activeTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1, transition: 'color 0.15s',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}>
-                  {tab.label}
-                  {tab.stale && (
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%',
-                      background: 'var(--warning)', flexShrink: 0,
-                    }} />
-                  )}
-                </button>
-              ))}
+                { key: 'setup', label: '기본 정보', group: true, stale: false },
+                { key: 'gameflow', label: '게임 플로우', group: false, stale: isGameFlowStale },
+                { key: 'workshop', label: '회의실', group: false, stale: false },
+                { key: 'studio', label: '스튜디오', group: false, stale: false },
+              ].map(tab => {
+                const active = tab.group ? isInfoActive : activeTab === tab.key
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      // '기본 정보' 그룹 탭: 그룹 밖에서 누르면 첫 서브탭(기본정보)으로,
+                      // 이미 그룹 안이면 현재 서브탭을 유지한다.
+                      if (tab.group) { if (!isInfoActive) setActiveTab('setup') }
+                      else setActiveTab(tab.key as 'gameflow' | 'studio' | 'workshop')
+                    }}
+                    style={{
+                      padding: '9px 16px', border: 'none', background: 'transparent',
+                      color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                      fontSize: 13, fontWeight: active ? 600 : 400,
+                      cursor: 'pointer',
+                      borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+                      marginBottom: -1, transition: 'color 0.15s',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    {tab.label}
+                    {tab.stale && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: 'var(--warning)', flexShrink: 0,
+                      }} />
+                    )}
+                  </button>
+                )
+              })}
             </div>
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, position: 'relative', paddingRight: 2 }}>
@@ -1277,6 +1289,35 @@ export function ProjectPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* '기본 정보' 그룹 서브탭: 기본정보 / 초안 / 보고서 */}
+        {hasCompletedReports && !running && isInfoActive && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+            {[
+              { key: 'setup', label: '기본 정보' },
+              { key: 'draft', label: '초안' },
+              { key: 'reports', label: '보고서' },
+            ].map(sub => {
+              const active = activeTab === sub.key
+              return (
+                <button
+                  key={sub.key}
+                  onClick={() => setActiveTab(sub.key as 'setup' | 'draft' | 'reports')}
+                  style={{
+                    padding: '6px 14px', borderRadius: 999,
+                    border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: active ? 'var(--accent-dim)' : 'var(--bg-card)',
+                    color: active ? 'var(--accent)' : 'var(--text-muted)',
+                    fontSize: 12.5, fontWeight: active ? 700 : 500,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {sub.label}
+                </button>
+              )
+            })}
           </div>
         )}
 
