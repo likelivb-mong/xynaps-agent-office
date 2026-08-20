@@ -30,6 +30,28 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, version: '1.0', mode: 'max-subscription' })
 })
 
+/**
+ * claude CLI 가 0 이 아닌 코드로 끝났을 때 사람이 읽을 수 있는 메시지를 만든다.
+ *
+ * CLI 는 "Not logged in · Please run /login" 같은 실패 사유를 stderr 가 아니라
+ * stdout 으로 내보낸다. stderr 만 보면 항상 비어 있어서 '알 수 없는 오류'가 됐다.
+ */
+function describeCliFailure(code, stdout, stderr) {
+  const out = (stdout || '').trim()
+  const err = (stderr || '').trim()
+  const detail = err || out
+
+  console.error(`[claude CLI] exit ${code}${detail ? ` — ${detail}` : ' — (출력 없음)'}`)
+
+  if (/not logged in|please run \/login/i.test(detail)) {
+    return 'Claude CLI에 로그인되어 있지 않습니다. 이 서버를 실행한 터미널에서 claude 를 실행해 /login 으로 로그인한 뒤, 서버를 다시 시작해주세요.'
+  }
+  if (/usage limit|rate limit/i.test(detail)) {
+    return `Claude 사용량 한도에 걸렸습니다. 잠시 후 다시 시도해주세요. (${detail})`
+  }
+  return `Claude CLI 오류 (exit ${code}): ${detail || '출력이 없습니다. 서버를 실행한 터미널 창의 로그를 확인해주세요.'}`
+}
+
 // 클라이언트가 보낸 Anthropic 모델 ID 를 Claude CLI 의 --model alias 로 매핑.
 // 알 수 없는 ID 는 null → CLI 기본 모델 사용.
 function resolveCliModel(modelId) {
@@ -123,9 +145,14 @@ function callClaudeCli(prompt, res, cliModel) {
     if (settled) return
     settled = true
     if (code !== 0) {
-      const errMsg = Buffer.concat(errChunks).toString().trim()
       return res.status(500).json({
-        error: { message: `Claude CLI 오류 (exit ${code}): ${errMsg || '알 수 없는 오류'}` }
+        error: {
+          message: describeCliFailure(
+            code,
+            Buffer.concat(chunks).toString(),
+            Buffer.concat(errChunks).toString(),
+          ),
+        },
       })
     }
     const text = Buffer.concat(chunks).toString().trim()
@@ -160,6 +187,7 @@ function callClaudeCliStream(prompt, res, cliModel) {
   res.setHeader('Connection', 'keep-alive')
 
   const errChunks = []
+  const outChunks = [] // 실패했을 때 사유가 stdout 으로 오므로 함께 모아둔다
   let settled = false
 
   const args = ['-p', '--output-format', 'text']
@@ -180,6 +208,7 @@ function callClaudeCliStream(prompt, res, cliModel) {
   }, 900000)
 
   proc.stdout.on('data', chunk => {
+    outChunks.push(chunk)
     res.write(`data: ${JSON.stringify({ type: 'delta', text: chunk.toString() })}\n\n`)
   })
 
@@ -190,8 +219,12 @@ function callClaudeCliStream(prompt, res, cliModel) {
     if (settled) return
     settled = true
     if (code !== 0) {
-      const errMsg = Buffer.concat(errChunks).toString().trim()
-      res.write(`data: ${JSON.stringify({ type: 'error', message: `Claude CLI 오류 (exit ${code}): ${errMsg || '알 수 없는 오류'}` })}\n\n`)
+      const message = describeCliFailure(
+        code,
+        Buffer.concat(outChunks).toString(),
+        Buffer.concat(errChunks).toString(),
+      )
+      res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`)
     } else {
       res.write('data: [DONE]\n\n')
     }
