@@ -2091,6 +2091,82 @@ function normalizeStoryBeats(parsed: { beats?: Array<Partial<StoryBeat>> }): Sto
   return { beats, generatedAt: new Date().toISOString() }
 }
 
+/** 비트 배열이 실제로 쓸 만한지 — 최소한 절반은 내용이 있어야 한다 */
+function hasUsableBeats(beats: Array<Partial<StoryBeat>> | undefined): boolean {
+  if (!Array.isArray(beats) || beats.length === 0) return false
+  const filled = beats.filter(b => (b.content || '').trim().length > 0).length
+  return filled >= beats.length / 2
+}
+
+/**
+ * 모델이 필드 이름을 자기 식대로 붙인 비트 객체를 우리 형식으로 옮긴다.
+ * 관찰된 실제 사례: { id, name: "오프닝 이미지", beat: "정전된 별관…", puzzle, reveal }
+ * — 여기서는 name 이 비트 이름이고 beat 가 내용이다.
+ */
+function mapLooseBeat(b: Record<string, unknown>): Partial<StoryBeat> {
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '')
+  let name = str(b.name) || str(b.title) || str(b.label)
+  let content = str(b.content) || str(b.description) || str(b.desc) || str(b.summary)
+  const beatField = str(b.beat)
+  if (beatField) {
+    // name 이 따로 있으면 beat 는 설명, 없으면 beat 가 이름이다
+    if (name && !content) content = beatField
+    else if (!name) name = beatField
+  }
+  return {
+    room: str(b.room) || undefined,
+    roomTag: str(b.roomTag) || undefined,
+    beat: name || undefined,
+    beatSub: str(b.beatSub) || str(b.subtitle) || undefined,
+    content: content || undefined,
+  }
+}
+
+/**
+ * 모델이 { beats: [...] } 대신 다른 모양으로 답했을 때 비트 배열을 건져낸다.
+ * 관찰된 실제 사례: { meta, premise, acts: [{ act, room, beats: [...] }] }
+ */
+function salvageBeatsArray(parsed: unknown): Array<Partial<StoryBeat>> | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const looksLikeBeat = (v: unknown): boolean =>
+    Boolean(v && typeof v === 'object' && ('beat' in v || 'content' in v || 'beatSub' in v))
+
+  const values = Object.values(parsed as Record<string, unknown>)
+
+  // 1) 최상위에 이름만 다른 비트 배열이 있는 경우
+  for (const v of values) {
+    if (Array.isArray(v) && v.length > 0 && v.every(looksLikeBeat)) {
+      return v.map(b => mapLooseBeat(b as Record<string, unknown>))
+    }
+  }
+
+  // 2) acts 처럼 한 단계 아래에 beats 가 중첩된 경우 — 순서대로 평평하게 편다.
+  //    바깥 항목의 room 정보는 안쪽 비트가 갖고 있지 않으면 물려준다.
+  for (const v of values) {
+    if (!Array.isArray(v)) continue
+    const flattened: Array<Partial<StoryBeat>> = []
+    for (const group of v) {
+      if (!group || typeof group !== 'object') continue
+      const g = group as Record<string, unknown>
+      const inner = g.beats
+      if (!Array.isArray(inner)) continue
+      for (const beat of inner) {
+        if (!looksLikeBeat(beat)) continue
+        flattened.push({
+          ...mapLooseBeat(beat as Record<string, unknown>),
+          room: (beat as Record<string, unknown>).room as string
+            || (typeof g.room === 'string' ? g.room : undefined),
+          roomTag: (beat as Record<string, unknown>).roomTag as string
+            || (typeof g.label === 'string' ? g.label : undefined),
+        })
+      }
+    }
+    if (flattened.length > 0) return flattened
+  }
+
+  return null
+}
+
 export async function compileStoryBeats(
   projectTheme: string,
   crimeConfig: CrimeConfig | undefined,
@@ -2127,7 +2203,13 @@ ${beatGuide}
   "beats": [
     { "room": "ROOM 1 — 공간이름", "roomTag": "1막 · 셋업", "beat": "셋업 (설정)", "beatSub": "한 줄 부제", "content": "내용" }
   ]
-}`
+}
+
+형식 제약 (반드시 준수):
+- 최상위 키는 "beats" 하나뿐입니다. meta, premise, acts, characters 등 다른 최상위 키를 추가하지 마세요.
+- 비트를 acts 안에 중첩하지 말고 beats 배열에 평평하게 나열하세요.
+- 각 비트 객체의 키는 room, roomTag, beat, beatSub, content 5개만 사용하세요.
+- beat 이름은 위에 지정된 한국어 이름을 그대로 쓰세요 (영문 키 금지).`
 
   const userContent: unknown[] = [
     ...(attachmentContent.length > 0 ? attachmentContent : []),
@@ -2148,15 +2230,30 @@ ${beatGuide}
     if (!response.ok) throw new Error(data.error?.message || 'API 오류')
     const text: string = extractText(data)
 
+    const repairExample = `{
+  "beats": [
+    { "room": "ROOM 1 — 공간이름", "roomTag": "1막 · 셋업", "beat": "셋업 (설정)", "beatSub": "부제", "content": "내용" }
+  ]
+}`
+
     let parsed: { beats?: Array<Partial<StoryBeat>> }
     try {
       parsed = parseModelJsonResponse(text) as { beats?: Array<Partial<StoryBeat>> }
     } catch {
-      parsed = await repairModelJsonResponse(text, `{
-  "beats": [
-    { "room": "ROOM 1 — 공간이름", "roomTag": "1막 · 셋업", "beat": "셋업 (설정)", "beatSub": "부제", "content": "내용" }
-  ]
-}`) as { beats?: Array<Partial<StoryBeat>> }
+      parsed = await repairModelJsonResponse(text, repairExample) as { beats?: Array<Partial<StoryBeat>> }
+    }
+
+    // JSON 자체는 유효한데 모양이 다른 경우가 있다.
+    // 예: { meta, premise, acts: [{ ..., beats: [...] }] } 처럼 acts 안에 중첩.
+    // 이러면 parsed.beats 가 undefined 라 파싱은 성공했는데 비트는 0개가 된다.
+    // 먼저 다른 위치에서 beats 를 건져보고, 그래도 없으면 그때 repair 를 돌린다.
+    if (!hasUsableBeats(parsed?.beats)) {
+      const salvaged = salvageBeatsArray(parsed)
+      if (hasUsableBeats(salvaged ?? undefined)) {
+        parsed = { beats: salvaged! }
+      } else {
+        parsed = await repairModelJsonResponse(text, repairExample) as { beats?: Array<Partial<StoryBeat>> }
+      }
     }
 
     const sheet = normalizeStoryBeats(parsed)

@@ -31,6 +31,36 @@ app.get('/api/health', (_req, res) => {
 })
 
 /**
+ * 사용자 메시지의 텍스트 블록을 "전부" 순서대로 이어붙인다.
+ *
+ * 예전에는 content 배열에서 .find(b => b.type === 'text') 로 *첫 번째* 텍스트
+ * 블록 하나만 꺼냈다. 그런데 앱은 항상
+ *   [ ...첨부파일 텍스트, ...스킬파일 텍스트, { type:'text', text: 실제_지시문 } ]
+ * 순서로 보낸다. 즉 첨부나 스킬 파일이 하나라도 있으면 파일 본문만 전달되고
+ * 정작 실제 지시문은 통째로 버려졌다. 모델은 문서만 받고 무엇을 하라는 말은
+ * 못 들은 셈이라, 비트 시트가 0개로 나오거나 엉뚱한 형식이 나왔다.
+ *
+ * (이미지·PDF 같은 바이너리 블록은 위쪽 hasBinary 분기에서 Anthropic API 로
+ *  넘어가므로 여기 도달하는 블록은 텍스트뿐이다.)
+ */
+function extractUserText(messages) {
+  const parts = []
+  for (const m of messages || []) {
+    if (!m || m.role !== 'user') continue
+    if (typeof m.content === 'string') {
+      parts.push(m.content)
+    } else if (Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block && block.type === 'text' && typeof block.text === 'string') {
+          parts.push(block.text)
+        }
+      }
+    }
+  }
+  return parts.join('\n\n')
+}
+
+/**
  * claude CLI 가 0 이 아닌 코드로 끝났을 때 사람이 읽을 수 있는 메시지를 만든다.
  *
  * CLI 는 "Not logged in · Please run /login" 같은 실패 사유를 stderr 가 아니라
@@ -90,12 +120,7 @@ app.post('/api/messages', async (req, res) => {
 
   // Extract text content for claude CLI
   const systemPrompt = typeof body.system === 'string' ? body.system : ''
-  const userMsg = body.messages?.find(m => m.role === 'user')
-  const userText = typeof userMsg?.content === 'string'
-    ? userMsg.content
-    : Array.isArray(userMsg?.content)
-      ? userMsg.content.find(b => b.type === 'text')?.text || ''
-      : ''
+  const userText = extractUserText(body.messages)
 
   // system 은 --system-prompt 로 넘겨 Claude Code 기본 시스템 프롬프트를 대체한다.
   //
