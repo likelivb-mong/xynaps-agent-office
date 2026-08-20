@@ -31,6 +31,66 @@ const TABLE_ROWS = [
   },
 ]
 
+const SERVER_DIR = '~/Downloads/xynaps-agent-office/server'
+
+const CERT_CMD = `cd ${SERVER_DIR} && openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes -keyout localhost-key.pem -out localhost.pem -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"`
+
+const START_CMD = `cd ${SERVER_DIR} && npm start`
+
+// 최초 1회만 — 이 맥에서 처음 쓸 때. 인증서(.pem)는 보안상 깃허브에 포함되지 않아 기기마다 직접 만들어야 한다.
+const SETUP_STEPS = [
+  {
+    title: '폴더 받기',
+    note: '폴더가 이미 있으면 건너뛰세요.',
+    cmd: 'git clone https://github.com/likelivb-mong/xynaps-agent-office.git ~/Downloads/xynaps-agent-office',
+  },
+  {
+    title: '설치',
+    cmd: `cd ${SERVER_DIR} && npm install`,
+  },
+  {
+    title: 'HTTPS 인증서 만들기',
+    note: '깃허브에 올라가지 않는 파일이라 기기마다 한 번씩 만들어야 합니다.',
+    cmd: CERT_CMD,
+  },
+]
+
+function CopyableCommand({ cmd }: { cmd: string }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 4 }}>
+      <code style={{
+        flex: 1, background: '#0f1117', padding: '5px 8px', borderRadius: 4,
+        fontSize: 10.5, color: '#cbd5e1', lineHeight: 1.6,
+        wordBreak: 'break-all', whiteSpace: 'pre-wrap',
+      }}>{cmd}</code>
+      <button
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(cmd)
+          } catch {
+            // 클립보드 권한이 없는 브라우저 — 임시 textarea 로 대체
+            const ta = document.createElement('textarea')
+            ta.value = cmd
+            document.body.appendChild(ta)
+            ta.select()
+            document.execCommand('copy')
+            document.body.removeChild(ta)
+          }
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        }}
+        style={{
+          padding: '4px 8px', borderRadius: 5, border: '1px solid #2f3447',
+          background: 'transparent', color: copied ? '#22c55e' : '#64748b',
+          fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+        }}
+      >{copied ? '복사됨' : '복사'}</button>
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { settings, updateSettings } = useSettings()
   const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('disconnected')
@@ -230,16 +290,69 @@ export function SettingsPage() {
               background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.18)',
               borderRadius: 8, padding: '10px 12px', fontSize: 11, color: '#fca5a5', lineHeight: 1.7,
             }}>
-              <strong>서버 시작 방법:</strong><br />
-              <code style={{ background: '#0f1117', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
-                cd ~/Downloads/xynaps-agent-office/server && npm start
-              </code>
-              <br />
-              <span style={{ color: '#94a3b8' }}>외부 접속 시 ngrok 사용: </span>
-              <code style={{ background: '#0f1117', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>
-                ngrok http 3001
-              </code>
-              <span style={{ color: '#94a3b8' }}> → 위 URL란에 입력</span>
+              <strong style={{ fontSize: 12 }}>매번 — AI 쓰기 전에 서버 켜기</strong>
+              <div style={{ color: '#94a3b8', marginTop: 2 }}>
+                맥의 <strong style={{ color: '#cbd5e1' }}>터미널</strong> 앱을 열고 아래를 붙여넣어 실행하세요.
+                실행 후 <strong style={{ color: '#cbd5e1' }}>터미널 창을 닫지 마세요</strong> — 닫으면 서버가 꺼집니다.
+              </div>
+              <CopyableCommand cmd={START_CMD} />
+              <div style={{ color: '#94a3b8', marginTop: 6 }}>
+                그 다음 위 <strong style={{ color: '#cbd5e1' }}>[연결 확인]</strong> 버튼을 누르면 "연결됨"으로 바뀝니다.
+              </div>
+
+              <div style={{ height: 1, background: 'rgba(239,68,68,0.18)', margin: '12px 0' }} />
+
+              <details>
+                <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#fca5a5' }}>
+                  처음 쓰는 맥이거나 위 명령이 안 될 때 — 최초 1회 설정 (펼치기)
+                </summary>
+
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: '#94a3b8', marginBottom: 8 }}>
+                    <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>no such file or directory</code> 오류가 나면
+                    폴더가 없는 것이고, <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>localhost.pem</code> 오류가 나면
+                    인증서가 없는 것입니다. 아래를 순서대로 한 번씩 실행하세요.
+                  </div>
+
+                  {SETUP_STEPS.map((step, i) => (
+                    <div key={step.title} style={{ marginBottom: 10 }}>
+                      <div style={{ color: '#e2e8f0', fontWeight: 600 }}>{i + 1}. {step.title}</div>
+                      {step.note && <div style={{ color: '#94a3b8' }}>{step.note}</div>}
+                      <CopyableCommand cmd={step.cmd} />
+                    </div>
+                  ))}
+
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ color: '#e2e8f0', fontWeight: 600 }}>4. 서버 켜기</div>
+                    <CopyableCommand cmd={START_CMD} />
+                  </div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ color: '#e2e8f0', fontWeight: 600 }}>5. 크롬에서 인증서 1회 허용</div>
+                    <div style={{ color: '#94a3b8' }}>
+                      크롬 새 탭에서{' '}
+                      <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>https://localhost:3001/api/health</code>{' '}
+                      접속 → 빨간 경고 화면에서 <strong style={{ color: '#cbd5e1' }}>[고급]</strong> →{' '}
+                      <strong style={{ color: '#cbd5e1' }}>[localhost(안전하지 않음)으로 이동]</strong> 클릭.{' '}
+                      <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>{'{"ok":true}'}</code>{' '}
+                      가 보이면 완료입니다. 내 컴퓨터 안에서만 도는 서버라 안전하며, 이 승인은 한 번만 하면 됩니다.
+                    </div>
+                  </div>
+
+                  <div style={{ color: '#94a3b8', marginTop: 12 }}>
+                    <strong style={{ color: '#e2e8f0' }}>전제 조건:</strong> Claude Max 구독으로 로그인된{' '}
+                    <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>claude</code> CLI가 이 맥에 설치돼 있어야 합니다.
+                    이미지·PDF를 첨부하는 작업은 Max 구독으로 처리되지 않아{' '}
+                    <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>ANTHROPIC_API_KEY</code>가 따로 필요합니다.
+                  </div>
+
+                  <div style={{ color: '#94a3b8', marginTop: 8 }}>
+                    <strong style={{ color: '#e2e8f0' }}>다른 기기에서 접속하려면:</strong>{' '}
+                    <code style={{ background: '#0f1117', padding: '1px 5px', borderRadius: 3 }}>ngrok http 3001</code>{' '}
+                    실행 후 나온 주소를 위 URL란에 입력하세요.
+                  </div>
+                </div>
+              </details>
             </div>
           )}
         </div>
