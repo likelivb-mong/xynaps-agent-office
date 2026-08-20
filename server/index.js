@@ -97,10 +97,24 @@ app.post('/api/messages', async (req, res) => {
       ? userMsg.content.find(b => b.type === 'text')?.text || ''
       : ''
 
-  // Combine system + user into single prompt for claude CLI
-  const fullPrompt = systemPrompt
-    ? `<system>\n${systemPrompt}\n</system>\n\n${userText}`
-    : userText
+  // system 은 --system-prompt 로 넘겨 Claude Code 기본 시스템 프롬프트를 대체한다.
+  //
+  // 예전에는 <system>...</system> 로 감싸 사용자 메시지 안에 넣었는데, 그러면
+  // "코딩 에이전트" 라는 CLI 기본 페르소나가 그대로 남아 앱의 출력 형식 지시를
+  // 눌러버렸다. 그 결과 [요약]/[상세] + <!--XYNAPS_HTML--> 조각 대신 <!DOCTYPE html>
+  // 로 시작하는 완성된 HTML 문서를 내놓았고, 앱은 마커가 없으니 렌더링하지 못하고
+  // 코드를 그대로 화면에 보여줬다.
+  //
+  // 인자 길이 제한(ARG_MAX)에 걸릴 만큼 큰 시스템 프롬프트는 예전 방식으로 되돌린다.
+  const MAX_SYSTEM_ARG = 120000
+  const useSystemFlag = systemPrompt.length > 0 && systemPrompt.length <= MAX_SYSTEM_ARG
+  const fullPrompt = useSystemFlag
+    ? userText
+    : (systemPrompt ? `<system>\n${systemPrompt}\n</system>\n\n${userText}` : userText)
+  const systemArg = useSystemFlag ? systemPrompt : null
+  if (systemPrompt.length > MAX_SYSTEM_ARG) {
+    console.warn(`[claude CLI] system 프롬프트가 너무 커서(${systemPrompt.length}자) 본문에 포함시킵니다.`)
+  }
 
   // 클라이언트가 지정한 모델 (e.g. 'claude-haiku-4-5-20251001') 을 CLI alias 로 변환.
   // 이전에는 항상 Claude CLI 기본 모델(보통 Sonnet/Opus)을 사용해서 puzzle 처럼
@@ -108,20 +122,27 @@ app.post('/api/messages', async (req, res) => {
   const cliModel = resolveCliModel(body.model)
   const wantStream = body.stream === true
   if (wantStream) {
-    callClaudeCliStream(fullPrompt, res, cliModel)
+    callClaudeCliStream(fullPrompt, res, cliModel, systemArg)
   } else {
-    callClaudeCli(fullPrompt, res, cliModel)
+    callClaudeCli(fullPrompt, res, cliModel, systemArg)
   }
 })
 
+/** claude -p 공통 인자 구성 */
+function buildCliArgs(cliModel, systemArg) {
+  const args = ['-p', '--output-format', 'text']
+  if (cliModel) args.push('--model', cliModel)
+  if (systemArg) args.push('--system-prompt', systemArg)
+  return args
+}
+
 // ── claude CLI subprocess (non-streaming) ───────────────────────────────────
-function callClaudeCli(prompt, res, cliModel) {
+function callClaudeCli(prompt, res, cliModel, systemArg) {
   const chunks = []
   const errChunks = []
   let settled = false
 
-  const args = ['-p', '--output-format', 'text']
-  if (cliModel) args.push('--model', cliModel)
+  const args = buildCliArgs(cliModel, systemArg)
   const proc = spawn('claude', args, {
     env: process.env,
     maxBuffer: 20 * 1024 * 1024,
@@ -181,7 +202,7 @@ function callClaudeCli(prompt, res, cliModel) {
 }
 
 // ── claude CLI subprocess (SSE streaming) ───────────────────────────────────
-function callClaudeCliStream(prompt, res, cliModel) {
+function callClaudeCliStream(prompt, res, cliModel, systemArg) {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -190,8 +211,7 @@ function callClaudeCliStream(prompt, res, cliModel) {
   const outChunks = [] // 실패했을 때 사유가 stdout 으로 오므로 함께 모아둔다
   let settled = false
 
-  const args = ['-p', '--output-format', 'text']
-  if (cliModel) args.push('--model', cliModel)
+  const args = buildCliArgs(cliModel, systemArg)
   const proc = spawn('claude', args, {
     env: process.env,
     stdio: ['pipe', 'pipe', 'pipe'],
