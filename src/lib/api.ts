@@ -2070,14 +2070,24 @@ const STORY_BEAT_NAMES = [
 ]
 
 function normalizeStoryBeats(parsed: { beats?: Array<Partial<StoryBeat>> }): StoryBeatsSheet {
-  const beats: StoryBeat[] = (parsed.beats || []).map((b, i) => ({
-    id: crypto.randomUUID(),
-    room: b.room || `ROOM ${i + 1}`,
-    roomTag: b.roomTag || STORY_BEAT_NAMES[i]?.act || '',
-    beat: b.beat || STORY_BEAT_NAMES[i]?.beat || `비트 ${i + 1}`,
-    beatSub: b.beatSub || '',
-    content: b.content || '',
-  }))
+  // 모델이 요청한 한국어 비트명 대신 스키마 키(opening_image, fun_and_games 등)를
+  // 그대로 뱉는 경우가 있다. 한글이 한 글자도 없는 이름은 우리 표준 이름으로 되돌린다.
+  const looksLikeSchemaKey = (name: string) => !/[가-힣]/.test(name)
+
+  const beats: StoryBeat[] = (parsed.beats || []).map((b, i) => {
+    const rawBeat = (b.beat || '').trim()
+    const beat = rawBeat && !looksLikeSchemaKey(rawBeat)
+      ? rawBeat
+      : STORY_BEAT_NAMES[i]?.beat || `비트 ${i + 1}`
+    return {
+      id: crypto.randomUUID(),
+      room: b.room || `ROOM ${i + 1}`,
+      roomTag: b.roomTag || STORY_BEAT_NAMES[i]?.act || '',
+      beat,
+      beatSub: b.beatSub || '',
+      content: b.content || '',
+    }
+  })
   return { beats, generatedAt: new Date().toISOString() }
 }
 
@@ -2150,13 +2160,20 @@ ${beatGuide}
     }
 
     const sheet = normalizeStoryBeats(parsed)
-    // JSON 파싱은 됐는데 beats 가 비어 있으면(모델이 형식을 벗어난 경우) 그대로
-    // 저장하지 않는다. 예전에는 '0개 비트' 시트가 조용히 저장돼 사용자는 왜
-    // 비었는지 알 수 없었다.
+    // 모델이 형식을 벗어난 결과를 그대로 저장하지 않는다.
+    // 예전에는 '비트 0개' 또는 '비트만 14개 있고 내용은 전부 빈' 시트가 조용히
+    // 저장돼, 사용자는 왜 비었는지 알 수 없고 다시 만들 방법도 알기 어려웠다.
     if (sheet.beats.length === 0) {
       throw new Error(
         '모델이 비트 시트를 형식에 맞게 반환하지 않아 비트가 0개입니다. 다시 시도해주세요. '
         + '(반복되면 에이전트 보고서를 먼저 생성했는지 확인해주세요)',
+      )
+    }
+    const emptyCount = sheet.beats.filter(b => !b.content.trim()).length
+    if (emptyCount > sheet.beats.length / 2) {
+      throw new Error(
+        `모델이 비트 이름만 만들고 내용을 채우지 않았습니다 (${sheet.beats.length}개 중 ${emptyCount}개가 빈 내용). `
+        + '다시 시도해주세요.',
       )
     }
     return sheet
