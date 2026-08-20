@@ -148,6 +148,10 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
     ? extractHtml(displayDetail)
     : { html: null, plain: '' }
   const editableDetail = (detailPlain || displayDetail || '').trim()
+  // 요약만 있는 보고서(개별 에이전트)와 상세까지 있는 보고서(최종 종합)를 구분한다.
+  const hasDetail = Boolean(detailHtml) || editableDetail.length > 0
+  // 상세가 없는 카드에서도 전문가 채팅은 쓸 수 있어야 한다.
+  const chatEnabled = hasDetail ? showDetail : true
 
   const markdownHtml = useMemo(() => {
     if (detailHtml) return null
@@ -297,22 +301,26 @@ export function ReportCard({ report, onNewVersion, onChatSave, onDeleteVersion, 
               <>
                 {!isFailed && (
                   <>
-                    <button
-                      onClick={() => setShowDetail(v => !v)}
-                      title={showDetail ? '요약만 보기로 전환' : '상세 보기로 전환'}
-                      style={iconBtn(showDetail)}
-                    >
-                      <EyeIcon width={13} height={13} />
-                    </button>
+                    {/* 개별 에이전트는 요약만 만들므로 상세가 없을 수 있다 —
+                        그럴 땐 빈 상세를 여는 버튼을 보여주지 않는다 */}
+                    {hasDetail && (
+                      <button
+                        onClick={() => setShowDetail(v => !v)}
+                        title={showDetail ? '요약만 보기로 전환' : '상세 보기로 전환'}
+                        style={iconBtn(showDetail)}
+                      >
+                        <EyeIcon width={13} height={13} />
+                      </button>
+                    )}
                     <div style={{ position: 'relative' }}>
                       <button
-                        onClick={() => { if (!showDetail) return; setShowChat(v => !v) }}
-                        disabled={!showDetail}
-                        title={showDetail ? (showChat ? '채팅 닫기' : '전문가 채팅') : '상세 보기에서만 채팅 가능'}
+                        onClick={() => { if (!chatEnabled) return; setShowChat(v => !v) }}
+                        disabled={!chatEnabled}
+                        title={chatEnabled ? (showChat ? '채팅 닫기' : '전문가 채팅') : '상세 보기에서만 채팅 가능'}
                         style={{
                           ...iconBtn(showChat),
-                          opacity: showDetail ? 1 : 0.35,
-                          cursor: showDetail ? 'pointer' : 'not-allowed',
+                          opacity: chatEnabled ? 1 : 0.35,
+                          cursor: chatEnabled ? 'pointer' : 'not-allowed',
                         }}
                       >
                         <ChatIcon width={13} height={13} />

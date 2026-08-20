@@ -1188,7 +1188,7 @@ ${QUALITY_DIRECTIVE}
 입력 처리 원칙(필독):
 - 첨부 파일·외부 링크(Google Drive·PDF 등)는 *선택* 참조 자료입니다. 없거나 접근 불가하면 위 프로젝트 맥락(테마·브리핑·이전 에이전트 산출물)만으로 즉시 산출물을 생성하세요.
 - 사용자에게 추가 정보·파일·권한·진행 방향을 *되묻지 마세요*. "공유해주시면", "허용해주시면", "어떤 작업을 진행하실 건가요", "말씀해주시면" 같은 문구로 답을 끝내지 마세요.
-- 정보가 부족한 부분은 합리적 가정을 세우고 본문에 "가정:" 으로 명시한 뒤 그대로 진행하세요. 안내문이나 사과문이 아닌, 실제 산출물(HTML 기획안)을 반드시 생성하세요.
+- 정보가 부족한 부분은 합리적 가정을 세우고 본문에 "가정:" 으로 명시한 뒤 그대로 진행하세요. 안내문이나 사과문이 아닌, 실제 산출물을 반드시 생성하세요.
 - 출력에 첨부 파일·PDF·권한·접근 여부에 대한 메타 언급(예: "PDF 없이", "파일 접근 권한 없이", "PDF 접근 불가 시 처리" 등)을 *포함하지 마세요*. 산출물에는 어떤 자료를 봤는지/못 봤는지에 대한 설명 없이 결과만 깨끗하게 작성하세요.
 
 역할 분담 — 중복 금지(필독):
@@ -1536,81 +1536,73 @@ ${chatSummary}`
   return { summary, detail }
 }
 
-const HTML_STYLE_GUIDE = `
-상세 보고서는 반드시 아래 형식으로 작성하세요:
+/**
+ * 개별 에이전트는 "요약만" 만든다.
+ *
+ * 예전에는 에이전트 7명이 각자 긴 HTML 상세 보고서를 만들었는데, 그 HTML 은
+ * 화면 표시 외에 어디에도 쓰이지 않았다 — 최종 종합(runFinalReport)도,
+ * 게임 플로우(compileGameFlow)도, 비트 시트(compileStoryBeats)도 전부
+ * r.summary 만 읽는다. 결과적으로 전체 소요 시간의 대부분과 화면의 장황함이
+ * 아무도 읽지 않는 산출물에 쓰이고 있었다.
+ *
+ * 그래서 개별 에이전트는 압축된 요약만 내고, 완성된 HTML 보고서는 최종 종합
+ * 단계에서 한 번만 만든다. 대신 요약이 이후 단계의 유일한 입력이므로 형식만
+ * 짧을 뿐 내용은 충실해야 한다.
+ */
+const SUMMARY_ONLY_GUIDE = `
+출력 형식 (반드시 준수):
 
 [요약]
-(3-5줄 순수 텍스트만. 이모지·마크다운·섹션 번호 없이 핵심 내용만 서술)
+(아래 규칙을 따른 순수 텍스트만. [상세] 섹션은 만들지 마세요.)
 
-[상세]
-<!--XYNAPS_HTML-->
-(다크 테마 인라인 스타일 HTML 시각화)
-
-보고서 구조 원칙:
-- 보고서 형식은 고정 템플릿을 따르지 않습니다.
-- 스킬 파일의 레퍼런스를 참고해 해당 테마와 산출물 성격에 가장 적합한 구조로 설계하세요.
-- 이모지(emoji) 사용 금지 — 요약과 HTML 상세 보고서 전체에서 이모지를 사용하지 마세요.
-- 간결성 원칙: 각 섹션은 핵심 정보만 담고 장황한 서술·중복·부연 설명을 배제하세요. 섹션 수는 최대 6개, 각 항목은 1-2줄 이내로 작성하세요.
-
-HTML 작성 규칙 (반드시 준수):
-- 모든 style은 inline으로만 작성 (외부 CSS, class 사용 금지)
-- font-family: -apple-system,BlinkMacSystemFont,'Segoe UI','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif
-- 기본 텍스트: color:#e2e8f0
-- 카드: background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px
-- 서브텍스트: color:#94a3b8 또는 color:#64748b
-- 섹션 레이블: font-size:10px;font-weight:700;letter-spacing:0.12em;color:#64748b (또는 강조색)
-- 배지: border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;background+color+border 조합
-- 테이블 필수 규칙: border-collapse:collapse; width:100%; table-layout:fixed
-  - thead: background:#1e293b
-  - th: padding:8px 12px; font-size:11px; font-weight:700; color:#64748b; text-align:left; border-bottom:2px solid #334155
-  - td: padding:8px 12px; font-size:12px; color:#e2e8f0; border-bottom:1px solid #1e293b; vertical-align:top; word-break:break-word; overflow-wrap:break-word
-  - 텍스트가 긴 컬럼(핵심행동·설명 등)은 반드시 width:35% 이상 지정하고 line-height:1.6 적용
-  - 짧은 컬럼(시간·수량·난이도 등)은 width:8~12% 지정 (white-space:nowrap 사용 금지 — 오버플로우 원인)
-- 색상 포인트는 에이전트 고유색 계열 사용
-- 한국어 텍스트 사용
-- 금지: "07 운영 · 예산" 섹션, "힌트 프로토콜", "예산 추정/견적" 관련 내용
+작성 규칙:
+- 8~14줄. 한 줄은 한 가지 결정 사항만 담습니다.
+- 각 줄은 "항목: 결론" 형태로 씁니다. 예) "러닝타임: 90분 6구간, 지하 복도실→지하 소묘실 선형 순차"
+- 확정된 수치·이름·순서를 반드시 포함하세요. 이 요약이 이후 단계(최종 보고서·게임 플로우·비트 시트)의 유일한 입력입니다.
+- 금지: HTML 태그, Markdown 기호(#, **, -, |, 표), 이모지, 인사말, 되묻는 질문.
+- 금지: 장황한 서술·중복·부연 설명. "~할 수 있습니다" 같은 가능성 나열 대신 확정형으로 쓰세요.
+- 정보가 부족하면 "가정: ..." 으로 한 줄 명시하고 그대로 진행하세요.
+- 금지 주제: 운영 예산·견적, 힌트 프로토콜.
+- 한국어로 작성하세요.
 `
 
 const AGENT_PROMPT_TEXTS: Record<AgentId, string> = {
-  ceo: `크리에이티브 디렉터 관점에서 HTML 시각화 기획안을 작성해주세요.
+  ceo: `크리에이티브 디렉터 관점에서 기획안의 핵심 결론을 요약해주세요.
 스킬 파일의 레퍼런스를 참고해 이 테마에 가장 적합한 구조로 자유롭게 설계하세요.
 핵심 산출물(테마 정체성·장르 전략·콘셉트 방향성)은 반드시 포함되어야 합니다.
-${HTML_STYLE_GUIDE}`,
-  concept: `스토리 아키텍트 관점에서 HTML 시각화 기획안을 작성해주세요.
+${SUMMARY_ONLY_GUIDE}`,
+  concept: `스토리 아키텍트 관점에서 기획안의 핵심 결론을 요약해주세요.
 핵심 산출물(세계관·인물 설정·스토리 흐름·Plan B)을 최대 7개 섹션으로 간결하게 구성하세요.
 각 섹션은 핵심 정보만 담고, 장황한 반복 서술 없이 명확하게 작성하세요.
 
-⚠️ 중요: 반드시 아래 [요약]/[상세] 형식을 따르고 [상세] 섹션은 반드시 <!--XYNAPS_HTML-->로 시작하는 인라인 스타일 HTML로 작성하세요. Markdown(#, **, -, |) 출력 절대 금지.
-${HTML_STYLE_GUIDE}`,
-  pd: `게임 디렉터 관점에서 HTML 시각화 기획안을 작성해주세요.
+${SUMMARY_ONLY_GUIDE}`,
+  pd: `게임 디렉터 관점에서 기획안의 핵심 결론을 요약해주세요.
 스킬 파일의 레퍼런스를 참고해 이 게임 구조에 가장 적합한 형식으로 자유롭게 설계하세요.
 핵심 산출물(플레이 타임라인·난이도 밸런스·엔딩 조건)은 반드시 포함되어야 합니다.
-${HTML_STYLE_GUIDE}`,
-  puzzle: `퍼즐 마스터 관점에서 HTML 시각화 기획안을 작성해주세요.
-핵심 산출물(퍼즐 흐름·X-KIT/Key/Dev 분류·잠금 연쇄 구조)을 **간결한 표 위주로** 정리하세요.
-중요: 장황한 서술·반복·부연 설명을 절대 쓰지 마세요. 핵심만 행 단위로 압축.
-- 퍼즐 흐름: 타임라인 표 1개 (섹션 5-7개 행, 각 행 1줄)
-- X-KIT/Key/Dev 분류: 표 1개 (10-15개 행 이내)
-- 잠금 연쇄 구조: 표 또는 간단한 다이어그램 1개
-HTML 전체는 짧게 유지 (큰 카드·반복 섹션 만들지 말 것).
-${HTML_STYLE_GUIDE}`,
-  space: `스페이스 디자이너 관점에서 HTML 시각화 기획안을 작성해주세요.
+${SUMMARY_ONLY_GUIDE}`,
+  puzzle: `퍼즐 마스터 관점에서 기획안의 핵심 결론을 요약해주세요.
+핵심 산출물(퍼즐 흐름·X-KIT/Key/Dev 분류·잠금 연쇄 구조)을 한 줄씩 압축해 정리하세요.
+- 퍼즐 흐름: 구간 순서대로 5~7줄 (구간명: 퍼즐 → 해제 대상)
+- X-KIT/Key/Dev 분류: 장치별 1줄씩, 합계 10줄 이내
+- 잠금 연쇄 구조: "A 해제 → B 개방" 형태로 2~3줄
+${SUMMARY_ONLY_GUIDE}`,
+  space: `스페이스 디자이너 관점에서 기획안의 핵심 결론을 요약해주세요.
 스킬 파일의 레퍼런스를 참고해 이 공간 구성에 가장 적합한 형식으로 자유롭게 설계하세요.
 핵심 산출물(방별 소품 배치·조명·사운드 연출·동선)은 반드시 포함되어야 합니다.
 온도·냉난방·향·미각 관련 연출은 현장 구현 불가하므로 *어떤 표나 항목에도 등장시키지 마세요*.
-${HTML_STYLE_GUIDE}`,
-  ops: `오퍼레이션 매니저 관점에서 HTML 시각화 기획안을 작성해주세요.
+${SUMMARY_ONLY_GUIDE}`,
+  ops: `오퍼레이션 매니저 관점에서 기획안의 핵심 결론을 요약해주세요.
 스킬 파일의 레퍼런스를 참고해 이 운영 환경에 가장 적합한 형식으로 자유롭게 설계하세요.
 핵심 산출물(브리핑·운영 체크리스트·안전 대응·현장 동선)은 반드시 포함되어야 합니다.
-${HTML_STYLE_GUIDE}`,
-  sound: `음향술사 관점에서 서라운드 오디오 스크립트를 HTML 시각화로 작성해주세요.
+${SUMMARY_ONLY_GUIDE}`,
+  sound: `음향술사 관점에서 서라운드 오디오 스크립트의 핵심 결론을 요약해주세요.
 스킬 파일의 레퍼런스를 참고해 이 사운드 연출에 가장 적합한 구조로 자유롭게 설계하세요.
 핵심 산출물(장면별 사운드 레이어·서라운드 포지션·타이밍 큐·감정 강도)은 반드시 포함되어야 합니다.
-${HTML_STYLE_GUIDE}`,
-  xfiler: `엑스파일러 관점에서 크라임씬 수사 시스템을 HTML 시각화로 작성해주세요.
+${SUMMARY_ONLY_GUIDE}`,
+  xfiler: `엑스파일러 관점에서 크라임씬 수사 시스템의 핵심 결론을 요약해주세요.
 스킬 파일의 레퍼런스를 참고해 이 사건 구조에 가장 적합한 형식으로 자유롭게 설계하세요.
 핵심 산출물(증거 목록·수사 플로우·용의자 프로파일·검거 조건)은 반드시 포함되어야 합니다.
-${HTML_STYLE_GUIDE}`,
+${SUMMARY_ONLY_GUIDE}`,
 }
 
 // 에이전트 산출물이 "권한 없음/되묻기" 안내문에 갇혔는지 탐지.
@@ -1745,7 +1737,16 @@ export async function runProjectCollaboration(
 
       const thinkingOpts = isPuzzleAgent ? undefined : resolveThinking('deep')
       const agentModel = isPuzzleAgent ? 'claude-haiku-4-5-20251001' : resolveModel('deep')
-      const agentMaxTokens = isPuzzleAgent ? 5000 : resolveMaxTokens('deep')
+      // 개별 에이전트는 8~14줄 요약만 만든다. 긴 HTML 보고서를 쓰던 시절의
+      // max_tokens 를 그대로 두면 모델이 분량을 채우려 장황해지고 시간도 그만큼 든다.
+      // 단, thinking 을 쓰는 경우 max_tokens 는 반드시 budget_tokens 보다 커야 하므로
+      // 그 하한은 그대로 지킨다 (API 직접 모드의 균형·최고 품질).
+      const AGENT_SUMMARY_MAX_TOKENS = 1600
+      const thinkingFloor = thinkingOpts ? thinkingOpts.budget_tokens + 2000 : 0
+      const agentMaxTokens = Math.max(
+        Math.min(isPuzzleAgent ? 5000 : resolveMaxTokens('deep'), AGENT_SUMMARY_MAX_TOKENS),
+        thinkingFloor,
+      )
       // Max 모드의 puzzle 은 Claude CLI stdout 버퍼링 때문에 streaming 시 idle timeout
       // 이 자주 fire — non-stream 으로 우회하므로 timeout 만 길게(10분) 잡고 idle 은 무시.
       const agentTimeoutMs = isPuzzleAgent ? 600_000 : 300_000
@@ -1776,7 +1777,7 @@ export async function runProjectCollaboration(
         console.warn(`[${agent.name}] placeholder 산출물 감지 → 재시도`)
         const retryNote = `\n\n⚠️ 재시도 지시(필독):
 - 첨부 파일·Google Drive·외부 링크는 *없거나 선택*입니다. 권한·파일을 다시 요청하지 마세요.
-- 위 프로젝트 맥락(테마·브리핑·이전 단계 산출물)만으로 *지금 즉시* HTML 기획안을 생성하세요.
+- 위 프로젝트 맥락(테마·브리핑·이전 단계 산출물)만으로 *지금 즉시* [요약] 을 생성하세요.
 - 사용자에게 어떤 작업을 할지 되묻지 마세요. 부족한 정보는 "가정:" 항목으로 명시한 뒤 그대로 작성하세요.`
         const retryContent: unknown[] = [
           ...(useAttachments ? attachmentContent : []),
@@ -1789,8 +1790,12 @@ export async function runProjectCollaboration(
       const summaryMatch = result.match(/\[요약\]([\s\S]*?)(?=\[상세\]|<!--XYNAPS_HTML-->|$)/)
       const detailMatch = result.match(/\[상세\]([\s\S]*)$/)
       const htmlMarkerIdx = result.indexOf('<!--XYNAPS_HTML-->')
-      const summary = summaryMatch?.[1]?.trim() || (htmlMarkerIdx > 0 ? result.slice(0, htmlMarkerIdx).replace('[요약]','').trim() : result.slice(0, 300))
-      const detail = detailMatch?.[1]?.trim() || result
+      const summary = summaryMatch?.[1]?.trim()
+        || (htmlMarkerIdx > 0 ? result.slice(0, htmlMarkerIdx).replace('[요약]', '').trim() : result.trim())
+      // 개별 에이전트는 이제 요약만 낸다. [상세] 가 없으면 detail 을 비워 두어야
+      // 카드가 요약과 똑같은 본문을 한 번 더 보여주지 않는다.
+      // (모델이 옛 형식으로 [상세] 를 붙여 오면 그건 그대로 살린다)
+      const detail = detailMatch?.[1]?.trim() ?? ''
 
       const report: AgentReport = {
         agentId,
@@ -2144,7 +2149,17 @@ ${beatGuide}
 }`) as { beats?: Array<Partial<StoryBeat>> }
     }
 
-    return normalizeStoryBeats(parsed)
+    const sheet = normalizeStoryBeats(parsed)
+    // JSON 파싱은 됐는데 beats 가 비어 있으면(모델이 형식을 벗어난 경우) 그대로
+    // 저장하지 않는다. 예전에는 '0개 비트' 시트가 조용히 저장돼 사용자는 왜
+    // 비었는지 알 수 없었다.
+    if (sheet.beats.length === 0) {
+      throw new Error(
+        '모델이 비트 시트를 형식에 맞게 반환하지 않아 비트가 0개입니다. 다시 시도해주세요. '
+        + '(반복되면 에이전트 보고서를 먼저 생성했는지 확인해주세요)',
+      )
+    }
+    return sheet
   } catch (error) {
     throw toReadableApiError(error, '스토리 비트 시트 생성에 실패했습니다.')
   }
