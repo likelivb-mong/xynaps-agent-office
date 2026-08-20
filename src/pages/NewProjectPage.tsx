@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { PaperclipIcon, Spinner, DownloadIcon, WriteIcon } from '../components/ui/Icon'
 import { createProject, createDraftVersion, getProjects, saveProject } from '../lib/storage'
 import { generateDraftCrimeConfigFromFiles, listGoogleDriveFolderMetadata, generateCombinationSummary } from '../lib/api'
+import { saveProjectDraft, loadProjectDraft, clearProjectDraft, formatDraftTime, type ProjectDraft } from '../lib/projectDraft'
 import { BRANCH_CODES } from '../data/questData'
 import { CRIME_MOTIVES, CRIME_TYPES, CRIME_CLUES, CRIME_METHODS, GENRES, STORY_STAGES } from '../data/crimeData'
 import type { BranchCode, CrimeConfig, SkillFile, Character, CharacterRelation, StoryStage, CharacterRole, RelationType, StoryStageKey, GameSystemType } from '../types'
@@ -1151,6 +1152,23 @@ export function NewProjectPage() {
 
   const autoFillBusy = autoFillPhase !== 'idle'
   const hasCrimePackUpload = Boolean(extractCrimePackFromFiles(crimePackFiles))
+
+  // ── 임시 저장 ──
+  // 편집 모드는 이미 저장된 프로젝트를 고치는 것이므로 초안을 쓰지 않는다.
+  const [pendingDraft, setPendingDraft] = useState<ProjectDraft | null>(
+    () => (isEditMode ? null : loadProjectDraft()),
+  )
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null)
+
+  // 어떤 자료 조합으로 자동 세팅을 이미 돌렸는지 기억해둔다.
+  // null = 아직 한 번도 안 돌림. 같은 조합이면 [다음]을 다시 눌러도 재생성하지 않는다.
+  const appliedAutoFillKeyRef = useRef<string | null>(null)
+  function autoFillSignature() {
+    return [...crimePackFiles, ...themeBundleFiles]
+      .map(f => `${f.id}:${f.name}`)
+      .sort()
+      .join('|')
+  }
   const canNext = step === 0 ? name.trim() !== '' && theme.trim() !== '' && !autoFillBusy : true
   const hasCrimeContent = motives.length > 0 || crimeTypes.length > 0 || clues.length > 0
     || methods.length > 0 || genres.length > 0 || location.trim() !== ''
@@ -1316,6 +1334,62 @@ export function NewProjectPage() {
     )
   }
 
+  // ── 임시 저장: 입력이 멈추면 잠시 뒤 자동 저장 ──
+  // 복원 여부를 아직 정하지 않았으면(pendingDraft) 저장하지 않는다 —
+  // 빈 화면이 기존 초안을 덮어써 버리는 걸 막기 위해.
+  useEffect(() => {
+    if (isEditMode || pendingDraft) return
+    const timer = setTimeout(() => {
+      const savedAt = saveProjectDraft({
+        step, name, theme, branches, gameSystemTypes,
+        motives, crimeTypes, clues, methods, genres, location,
+        characters, relations, storyFlow, previewSummary,
+        driveFolderLink, driveFolderId,
+        attachedFileNames: [...crimePackFiles, ...themeBundleFiles].map(f => f.name),
+      })
+      if (savedAt) setDraftSavedAt(savedAt)
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [
+    isEditMode, pendingDraft,
+    step, name, theme, branches, gameSystemTypes,
+    motives, crimeTypes, clues, methods, genres, location,
+    characters, relations, storyFlow, previewSummary,
+    driveFolderLink, driveFolderId, crimePackFiles, themeBundleFiles,
+  ])
+
+  function restorePendingDraft() {
+    const d = pendingDraft
+    if (!d) return
+    setName(d.name)
+    setTheme(d.theme)
+    setBranches(d.branches ?? [])
+    setGameSystemTypes(d.gameSystemTypes?.length ? d.gameSystemTypes : ['escape'])
+    setMotives(d.motives ?? [])
+    setCrimeTypes(d.crimeTypes ?? [])
+    setClues(d.clues ?? [])
+    setMethods(d.methods ?? [])
+    setGenres(d.genres ?? [])
+    setLocation(d.location ?? '')
+    setCharacters(d.characters ?? [])
+    setRelations(d.relations ?? [])
+    if (d.storyFlow?.length) setStoryFlow(d.storyFlow)
+    setPreviewSummary(d.previewSummary ?? null)
+    setDriveFolderLink(d.driveFolderLink ?? '')
+    setDriveFolderId(d.driveFolderId ?? null)
+    setStep(d.step ?? 0)
+    setDraftSavedAt(d.savedAt)
+    // 복원된 내용은 자동 세팅으로 다시 덮어쓰지 않는다
+    appliedAutoFillKeyRef.current = ''
+    setPendingDraft(null)
+  }
+
+  function discardPendingDraft() {
+    clearProjectDraft()
+    setDraftSavedAt(null)
+    setPendingDraft(null)
+  }
+
   useEffect(() => {
     const normalized = splitThemeBundleFiles(themeBundleFiles)
     setFloorPlans(normalized.floorPlans)
@@ -1445,6 +1519,10 @@ export function NewProjectPage() {
     )
     if (!ok) return
 
+    // 비우고 다시 만들 수 있도록 자동 세팅 기록도 함께 지운다
+    // (안 지우면 같은 자료로 [다음]을 눌러도 재생성되지 않는다)
+    appliedAutoFillKeyRef.current = null
+
     setMotives([])
     setCrimeTypes([])
     setClues([])
@@ -1527,6 +1605,7 @@ export function NewProjectPage() {
       user?.displayName,
     )
     createDraftVersion(project.id)
+    clearProjectDraft() // 생성 완료 — 임시 저장본은 더 필요 없다
     navigate(`/project/${project.id}`)
   }
 
@@ -1723,7 +1802,25 @@ export function NewProjectPage() {
   async function handleNextClick() {
     if (step === 0) {
       const hasFiles = themeBundleFiles.length > 0 || crimePackFiles.length > 0
-      if (hasFiles) {
+      const signature = autoFillSignature()
+
+      // 이미 이 자료 조합으로 자동 세팅을 돌렸다면 다시 돌리지 않는다.
+      // (재실행하면 2단계에서 편집한 내용이 통째로 덮어써지고 AI 호출 비용도 다시 든다)
+      const alreadyApplied = appliedAutoFillKeyRef.current === signature
+
+      if (hasFiles && !alreadyApplied) {
+        // 자료가 바뀌어 새로 생성해야 하는데, 이미 편집해둔 내용이 있으면 먼저 확인받는다
+        if (appliedAutoFillKeyRef.current !== null && hasCrimeContent) {
+          const ok = window.confirm(
+            '업로드한 자료가 바뀌었습니다.\n'
+            + '수사 백과사전을 새로 생성하면 지금까지 편집한 내용이 모두 사라집니다.\n\n'
+            + '확인 = 새로 생성 / 취소 = 편집한 내용 그대로 두고 넘어가기',
+          )
+          if (!ok) {
+            setStep(1)
+            return
+          }
+        }
         await applyThemeBundleFiles() // 내부에서 setStep(1) 호출
       } else {
         if (canNext) setStep(1)
@@ -1779,6 +1876,9 @@ export function NewProjectPage() {
         setAutoFillPhase('idle')
         return
       }
+
+      // 이 자료 조합은 처리 완료 — 같은 자료로 [다음]을 다시 눌러도 재생성하지 않는다
+      appliedAutoFillKeyRef.current = autoFillSignature()
 
       setAutoFillPhase('complete')
       await wait(900)
@@ -1871,6 +1971,14 @@ export function NewProjectPage() {
         </button>
         <span style={{ color: 'var(--border)' }}>|</span>
         <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>{isEditMode ? '수사 백과사전 편집' : '새 프로젝트'}</div>
+        {!isEditMode && draftSavedAt && (
+          <span
+            title="입력한 내용은 이 브라우저에 자동으로 임시 저장됩니다. 실수로 창을 닫아도 다시 들어오면 이어서 작성할 수 있습니다."
+            style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
+          >
+            임시 저장됨 · {formatDraftTime(draftSavedAt)}
+          </span>
+        )}
         {step > 0 && (
           <button
             onClick={resetCrimeEncyclopedia}
@@ -1892,6 +2000,37 @@ export function NewProjectPage() {
       </header>
 
       <main style={{ padding: '34px 32px 40px', maxWidth: 780, margin: '0 auto', boxSizing: 'border-box' }}>
+
+        {/* 작성하다 만 내용이 남아 있을 때 — 이어서 쓸지 새로 시작할지 먼저 물어본다 */}
+        {pendingDraft && (
+          <div style={{
+            border: '1px solid rgba(163,230,53,0.35)', background: 'rgba(163,230,53,0.07)',
+            borderRadius: 14, padding: '16px 18px', marginBottom: 24,
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
+              작성하던 내용이 있습니다
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+              {formatDraftTime(pendingDraft.savedAt)}에 임시 저장됨
+              {pendingDraft.name.trim() ? ` · ${pendingDraft.name.trim()}` : ''}
+              {pendingDraft.attachedFileNames?.length > 0 && (
+                <><br />첨부했던 자료({pendingDraft.attachedFileNames.join(', ')})는 용량 때문에 저장되지 않습니다 — 필요하면 다시 올려주세요.</>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button onClick={restorePendingDraft} style={{
+                padding: '8px 16px', borderRadius: 9, border: 'none',
+                background: 'var(--accent, #a3e635)', color: '#0b0d10',
+                fontSize: 12, fontWeight: 800, cursor: 'pointer',
+              }}>이어서 작성</button>
+              <button onClick={discardPendingDraft} style={{
+                padding: '8px 16px', borderRadius: 9, border: '1px solid var(--border)',
+                background: 'transparent', color: 'var(--text-secondary)',
+                fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              }}>새로 시작</button>
+            </div>
+          </div>
+        )}
 
         {/* 스텝 인디케이터 */}
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 36 }}>
