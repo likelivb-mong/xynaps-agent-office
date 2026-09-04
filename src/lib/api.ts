@@ -1,4 +1,5 @@
-import type { Agent, SkillFile, AgentReport, AgentId, CrimeConfig, GameFlowSheet, GameFlowSection, GameStep, ProblemType, ChatMessage, GameSystemType, BriefingData, CharacterRole, StoryStageKey, WorkshopSession, StoryBeatsSheet, StoryBeat } from '../types'
+import type { Agent, SkillFile, AgentReport, AgentId, CrimeConfig, GameFlowSheet, GameFlowSection, GameStep, ProblemType, ChatMessage, GameSystemType, BriefingData, CharacterRole, StoryStageKey, WorkshopSession, StoryBeatsSheet, StoryBeat, StoryNote } from '../types'
+import { buildStoryNoteContext, type StoryNoteDraft } from './storyNote'
 import { AGENTS } from '../data/agents'
 import { XKIT_DEFINITION } from '../data/questData'
 
@@ -93,7 +94,7 @@ function extractText(data: { content?: Array<{ type: string; text?: string }> })
   return data.content?.find(b => b.type === 'text')?.text ?? ''
 }
 
-export type CostActionType = 'full-collaboration' | 'rerun-from-agent' | 'game-flow' | 'regenerate' | 'single-agent-refresh'
+export type CostActionType = 'full-collaboration' | 'rerun-from-agent' | 'game-flow' | 'regenerate' | 'single-agent-refresh' | 'story-note'
 
 export function getEstimatedCost(action: CostActionType): string | null {
   if (isMaxMode()) return null
@@ -104,6 +105,7 @@ export function getEstimatedCost(action: CostActionType): string | null {
     'game-flow':             { '절약': '약 200~400원',    '균형': '약 700~1,500원',      '최고': '약 2,000~4,000원' },
     'regenerate':            { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
     'single-agent-refresh':  { '절약': '약 200~400원',    '균형': '약 1,500~2,200원',    '최고': '약 3,500~5,000원' },
+    'story-note':            { '절약': '약 100~200원',    '균형': '약 300~600원',        '최고': '약 300~600원' },
   }
   return costs[action][q]
 }
@@ -1649,6 +1651,7 @@ export async function runProjectCollaboration(
     seedReports?: AgentReport[]
     signal?: AbortSignal
     timeoutMs?: number
+    storyNote?: StoryNote
   }
 ): Promise<AgentReport[]> {
   const reports: AgentReport[] = [...(options?.seedReports ?? [])]
@@ -1656,6 +1659,11 @@ export async function runProjectCollaboration(
 
   if (crimeConfig) {
     cumulativeContext += buildCrimeContext(crimeConfig) + '\n\n'
+  }
+  // 스토리 작업노트(나침반·인물 코어시트·공간·관계선·줄거리 구조·복선)는 기획자가 직접 쓴 설계이므로 함께 주입
+  const storyNoteContext = buildStoryNoteContext(options?.storyNote)
+  if (storyNoteContext) {
+    cumulativeContext += storyNoteContext + '\n\n'
   }
 
   const systemTypeCtx = gameSystemTypes?.length
@@ -1919,7 +1927,8 @@ export async function compileGameFlow(
   crimeConfig: CrimeConfig | undefined,
   agentReports: AgentReport[],
   attachments?: SkillFile[],
-  onProgress?: (status: 'running' | 'done') => void
+  onProgress?: (status: 'running' | 'done') => void,
+  storyNote?: StoryNote,
 ): Promise<GameFlowSheet> {
   onProgress?.('running')
 
@@ -1928,6 +1937,8 @@ export async function compileGameFlow(
   ).join('\n\n')
 
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
+  // 스토리 작업노트는 잘라내지 않고 별도 블록으로 (기획자가 직접 쓴 설계이므로 우선 반영)
+  const storyNoteContext = buildStoryNoteContext(storyNote)
   const attachmentContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
 
   const systemPrompt = `방탈출 게임 플로우 시트 전문가. 유효한 JSON만 반환, 다른 텍스트 없음.
@@ -1936,6 +1947,7 @@ Xkit=디지털파일장치 Key=물리잠금 Dev=전자센서/트리거
 
   const userPrompt = `테마: ${projectTheme}
 ${crimeContext ? crimeContext.split('\n').slice(0, 10).join('\n') : ''}
+${storyNoteContext ? `\n${storyNoteContext}\n` : ''}
 
 에이전트 요약:
 ${reportsText}
@@ -2172,12 +2184,15 @@ export async function compileStoryBeats(
   crimeConfig: CrimeConfig | undefined,
   agentReports: AgentReport[],
   attachments?: SkillFile[],
+  storyNote?: StoryNote,
 ): Promise<StoryBeatsSheet> {
   const reportsText = agentReports.map(r =>
     `### ${r.agentName} (${r.agentId})\n${r.summary || r.detail}`
   ).join('\n\n')
 
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
+  // 스토리 작업노트는 잘라내지 않고 별도 블록으로 (기획자가 직접 쓴 설계이므로 우선 반영)
+  const storyNoteContext = buildStoryNoteContext(storyNote)
   const attachmentContent = filterBinaryForMaxMode(buildFileContent(attachments ?? []))
 
   const systemPrompt = `방탈출 스토리 구조 전문가. 시드 필드 3막 구조 기반 비트 시트 작성. 유효한 JSON만 반환, 다른 텍스트 없음.`
@@ -2186,6 +2201,7 @@ export async function compileStoryBeats(
 
   const userPrompt = `테마: ${projectTheme}
 ${crimeContext ? crimeContext.split('\n').slice(0, 10).join('\n') : ''}
+${storyNoteContext ? `\n${storyNoteContext}\n` : ''}
 
 에이전트 요약:
 ${reportsText}
@@ -2285,12 +2301,15 @@ export async function compileGameFlowFromBeats(
   crimeConfig: CrimeConfig | undefined,
   storyBeats: StoryBeatsSheet,
   existingSheet?: GameFlowSheet,
+  storyNote?: StoryNote,
 ): Promise<GameFlowSheet> {
   const beatsText = storyBeats.beats.map((b, i) =>
     `${i + 1}. [${b.room}] ${b.beat}${b.beatSub ? ` — ${b.beatSub}` : ''}\n${b.content}`
   ).join('\n\n')
 
   const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : ''
+  // 스토리 작업노트는 잘라내지 않고 별도 블록으로 (기획자가 직접 쓴 설계이므로 우선 반영)
+  const storyNoteContext = buildStoryNoteContext(storyNote)
 
   const systemPrompt = `방탈출 게임 플로우 시트 전문가. 유효한 JSON만 반환, 다른 텍스트 없음.
 Xkit=디지털파일장치 Key=물리잠금 Dev=전자센서/트리거
@@ -2298,6 +2317,7 @@ Xkit=디지털파일장치 Key=물리잠금 Dev=전자센서/트리거
 
   const userPrompt = `테마: ${projectTheme}
 ${crimeContext ? crimeContext.split('\n').slice(0, 10).join('\n') : ''}
+${storyNoteContext ? `\n${storyNoteContext}\n` : ''}
 
 스토리 비트 시트 (시드 필드 3막 구조, 이 구조와 내용을 충실히 따를 것):
 ${beatsText}
@@ -2528,4 +2548,94 @@ export async function generateCombinationSummary(crime: CrimeConfig): Promise<st
   const data = await response.json()
   if (!response.ok) throw new Error(data.error?.message || '사건 조합 생성 실패')
   return extractText(data).trim()
+}
+
+// ── 스토리 작업노트 AI 초안 ───────────────────────────────────────────────────
+// 테마·수사 백과사전·(있으면) 기존 노트를 바탕으로 빈 칸을 채울 초안을 만든다.
+// 병합은 호출 측에서 mergeStoryNoteDraft 로 — 사용자가 쓴 내용은 덮어쓰지 않는다.
+const STORY_NOTE_DRAFT_SCHEMA = `{
+  "compass": { "logline": "...", "coreConflict": "...", "differentiator": "...", "genreTone": "...", "freeNotes": "..." },
+  "principles": [
+    { "title": "강약조절 · 속도감", "note": "이 테마에서 힘줘야 할 한 장면과 나머지의 완급" },
+    { "title": "캐릭터는 설정이 아니라 행동 매뉴얼", "note": "..." },
+    { "title": "납득 가능한 서사 — 플레이어는 뒷내용을 모른다", "note": "..." }
+  ],
+  "characterSheets": [
+    { "name": "...", "identity": "한 줄 정체성", "lack": "...", "lie": "...", "neverDoes": "...", "mannerisms": "...",
+      "simulations": [{ "situation": "...", "reaction": "..." }] }
+  ],
+  "spaceNotes": [
+    { "roomName": "...", "purpose": "...", "duality": "...", "sensoryDetail": "...", "keyEvents": "..." }
+  ],
+  "relationArcs": [
+    { "fromName": "...", "toName": "...", "closenessStart": 0, "closenessMid": 0, "closenessEnd": 0, "howShown": "..." }
+  ],
+  "plotParts": [
+    { "stage": "기", "title": "...", "goal": "...", "turningPoint": "...", "climax": "..." },
+    { "stage": "승", "title": "...", "goal": "...", "turningPoint": "...", "climax": "..." },
+    { "stage": "전", "title": "...", "goal": "...", "turningPoint": "...", "climax": "..." },
+    { "stage": "반전", "title": "...", "goal": "...", "turningPoint": "...", "climax": "..." },
+    { "stage": "결", "title": "...", "goal": "...", "turningPoint": "...", "climax": "..." }
+  ],
+  "roomNav": [
+    { "label": "방 이름", "event": "...", "emotion": "...", "playerFeels": "...", "nextHook": "...", "nextTeaser": "...", "endingType": "감|정|위|대" }
+  ],
+  "foreshadows": [
+    { "content": "...", "plantedAt": "설치 위치(방/스텝)", "payoffAt": "회수 위치(방/스텝)", "status": "설치|회수|미회수|폐기", "memo": "..." }
+  ]
+}`
+
+export async function generateStoryNoteDraft(
+  projectName: string,
+  projectTheme: string,
+  crimeConfig: CrimeConfig | undefined,
+  currentNote: StoryNote | undefined,
+): Promise<StoryNoteDraft> {
+  await assertApiReadyAsync()
+  const crimeContext = crimeConfig ? buildCrimeContext(crimeConfig) : '수사 백과사전 정보 없음'
+  const noteContext = buildStoryNoteContext(currentNote) || '아직 비어 있음'
+  const characterNames = (crimeConfig?.characters ?? []).map(c => c.name || c.role).filter(Boolean)
+  const roomNames = (crimeConfig?.storyFlow ?? []).map(s => s.roomName).filter(Boolean)
+
+  const system = `당신은 방탈출/크라임씬 테마의 스토리 아키텍트입니다.
+소설가의 작업노트(스토리 나침반 · 집필 원칙 · 인물 코어시트 · 공간 설정 노트 · 관계선 지도 · 전체 줄거리 구조 · 회차 네비게이션 · 복선 트래커)를
+방탈출 스토리 설계에 응용해 초안을 작성합니다. 반드시 유효한 JSON만 반환하고 설명문은 금지합니다.`
+
+  const prompt = `프로젝트 이름: ${projectName}
+프로젝트 테마: ${projectTheme}
+
+${crimeContext}
+
+현재 작업노트 (이미 채워진 항목은 그대로 두고, 빈 항목만 채우기 위한 참고):
+${noteContext}
+
+요청:
+- 아래 JSON 형식으로 스토리 작업노트 초안을 작성하세요.
+- 나침반: 로그라인은 한 줄만 보고도 테마 전체가 떠올라야 합니다. 핵심 갈등은 "인물이 진짜 싸우고 있는 것", 차별점은 "다른 방탈출 테마와 다른 단 하나의 지점", genreTone 은 장르·분위기·플레이 후 남을 뒷맛.
+- 원칙(principles): 세 원칙 각각에 대해 이 테마에서의 구체적 적용 메모(note)만 작성하세요. title 은 그대로 두세요.
+- 인물 코어시트: 등장인물${characterNames.length ? ` (${characterNames.join(', ')})` : ''} 각각에 대해 결핍(진짜 원하는 것), 거짓말(스스로·세상에게 하는 거짓말 — 용의자라면 알리바이·은폐 포함), 절대 하지 않을 행동, 말투·습관(음성/메모/단서 톤에 쓸 수 있게), 상황→행동 시뮬레이션 2~3개.
+- 공간 설정 노트: 공간${roomNames.length ? ` (${roomNames.join(', ')})` : ''} 각각에 대해 기능(플롯상 없으면 무너지는 것), 이중성·대비(겉보기 vs 실제 / 조명 켜졌을 때 vs 꺼졌을 때), 감각적 디테일(보이는 것·들리는 것·냄새·온도 — 실제 연출에 쓸 수 있는 구체 묘사), 이 공간이 아니면 일어날 수 없는 핵심 사건·퍼즐.
+- 관계선 지도: 주요 인물 쌍의 관계가 시작→중간→결말에서 어떻게 휘어지는지 0(멀어짐)~4(가까움) 정수로, 그리고 그 변화를 설명 대사가 아니라 단서·소품·연출로 어떻게 보여줄지.
+- 전체 줄거리 구조: 기/승/전/반전/결 5부 각각 목표·전환점·클라이맥스. 플레이어가 게임 중 알게 되는 순서 기준.
+- 방(회차) 네비게이션: 공간 순서대로, 각 방이 왜 존재하는지(사건), 이번 방 감정, 플레이어가 느낄 것, 다음 방 훅, 다음 방 예고, 엔딩 유형(감=감정적 감동, 정=정보의 폭발, 위=위기 발생, 대=대치 — 방마다 하나씩 골라 동그라미).
+- 복선·떡밥 트래커: 설치할 복선 4~8개. 설치 위치와 회수 위치를 방/스텝 단위로 적고 status 는 "설치".
+- 인물명·공간명은 위에 주어진 이름을 정확히 그대로 사용하세요. 과장 금지, 사건 설정 근거 중심.
+
+반환 JSON 형식:
+${STORY_NOTE_DRAFT_SCHEMA}`
+
+  const response = await fetchAnthropicWithTimeout({
+    model: resolveModel('fast'),
+    max_tokens: Math.max(resolveMaxTokens('fast'), 7000),
+    system,
+    messages: [{ role: 'user', content: prompt }],
+  }, { timeoutMs: 240000 })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message || '스토리 노트 초안 생성 실패')
+  const text = extractText(data)
+  try {
+    return parseModelJsonResponse(text) as StoryNoteDraft
+  } catch {
+    return await repairModelJsonResponse(text, STORY_NOTE_DRAFT_SCHEMA) as StoryNoteDraft
+  }
 }

@@ -266,6 +266,7 @@ function runJob(project: Project, version: ProjectVersion, mode: RerunMode, star
         freshProject.briefings,
         getCommonSkills(),
         {
+          storyNote: freshProject.storyNote,
           startFromAgentId: mode === 'from-agent' ? startAgentId : undefined,
           seedReports,
           signal: abortController.signal,
@@ -688,6 +689,7 @@ export function rerunSingleAgent(projectId: string, versionId: string, agentId: 
         freshProject.briefings,
         commonSkills,
         {
+          storyNote: freshProject.storyNote,
           startFromAgentId: agentId,
           endAtAgentId: agentId,
           seedReports,

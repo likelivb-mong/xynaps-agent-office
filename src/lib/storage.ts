@@ -447,6 +447,17 @@ export function updateVersionStoryBeats(
   saveProject(project)
 }
 
+// 스토리 작업노트 (프로젝트 단위). 항상 storage 최신본 위에 덮어써서
+// 다른 경로(게임플로우·비트 시트 저장)의 변경을 지우지 않는다.
+export function updateProjectStoryNote(projectId: string, storyNote: import('../types').StoryNote): void {
+  const projects = getProjects()
+  const project = projects.find(p => p.id === projectId)
+  if (!project) return
+  project.storyNote = storyNote
+  project.updatedAt = new Date().toISOString()
+  saveProject(project)
+}
+
 export function updateVersionAudioScript(
   projectId: string,
   versionId: string,

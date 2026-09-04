@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Spinner, DownloadIcon, RefreshIcon, EyeIcon, ListIcon, AgentIconCeo, HistoryIcon, WriteIcon } from '../components/ui/Icon'
-import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionStoryBeats, updateVersionAudioScript, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase, onSaveStatus, getSaveStatus, type SaveStatus } from '../lib/storage'
+import { getProjects, updateVersionReports, updateVersionGameFlow, updateVersionStoryBeats, updateVersionAudioScript, updateProjectStoryNote, updateAgentReportChat, saveProject, deleteAgentReportVersion, setAgentReportActiveVersion, syncProjectsFromSupabase, onSaveStatus, getSaveStatus, type SaveStatus } from '../lib/storage'
 import { safeGetItem, safeSetItem } from '../lib/storageCompression'
 import { GroupBriefingChat } from '../components/briefing/GroupBriefingChat'
-import { compileGameFlow, compileStoryBeats, compileGameFlowFromBeats, compileAudioScript } from '../lib/api'
+import { compileGameFlow, compileStoryBeats, compileGameFlowFromBeats, compileAudioScript, generateStoryNoteDraft } from '../lib/api'
+import { StoryNotePanel } from '../components/StoryNotePanel'
+import { normalizeStoryNote, syncStoryNoteWithCrime, mergeStoryNoteDraft, isStoryNoteEmpty } from '../lib/storyNote'
 import { useCostConfirm } from '../components/ui/CostConfirmModal'
 import { cancelCollaborationRunner, getCollaborationSnapshot, isFailedAgentReport, rerunEntireCollaboration, rerunFromAgent, rerunFinalReportOnly, rerunSingleAgent, isSingleAgentRunning, startCollaborationRunner, subscribeCollaboration } from '../lib/collaborationRunner'
 import { ReportCard } from '../components/reports/ReportCard'
@@ -16,7 +18,10 @@ import AudioScriptTable from '../components/AudioScriptTable'
 import { MetaStudio } from '../components/MetaStudio'
 import { WorkshopTab } from '../components/workshop/WorkshopTab'
 import { AGENTS } from '../data/agents'
-import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, StoryBeatsSheet, AudioScript, ChatMessage, DetailVersion } from '../types'
+import type { Project, AgentReport, FinalReport, AgentId, GameFlowSheet, StoryBeatsSheet, AudioScript, ChatMessage, DetailVersion, StoryNote } from '../types'
+
+// 프로젝트 화면 탭. '기본 정보' 그룹 = setup / draft / storynote / reports
+type ProjectTab = 'setup' | 'draft' | 'storynote' | 'reports' | 'gameflow' | 'studio' | 'workshop'
 
 // ─── 회의록 카드 ─────────────────────────────────────────────────────────────
 function parseMinutesSections(text: string): { title: string; body: string }[] {
@@ -235,6 +240,10 @@ export function ProjectPage() {
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
   // 게임플로우 저장 디바운스용 대기 상태 (handleGameFlowChange / flushGameFlowSave 참조)
   const gameFlowSaveRef = useRef<{ timer: number | null; pid: string; vid: string; sheet: GameFlowSheet } | null>(null)
+  // 스토리 노트 저장 디바운스 (handleStoryNoteChange / flushStoryNoteSave 참조)
+  const storyNoteSaveRef = useRef<{ timer: number | null; pid: string; note: StoryNote } | null>(null)
+  const [generatingStoryNote, setGeneratingStoryNote] = useState(false)
+  const [storyNoteError, setStoryNoteError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [runningAgentId, setRunningAgentId] = useState<AgentId | null>(null)
   const [liveReports, setLiveReports] = useState<AgentReport[]>([])
@@ -244,7 +253,7 @@ export function ProjectPage() {
   const [finalEditMode, setFinalEditMode] = useState(false)
   const [finalEditSummary, setFinalEditSummary] = useState('')
   const [finalEditDetail, setFinalEditDetail] = useState('')
-  const [activeTab, setActiveTab] = useState<'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop'>('reports')
+  const [activeTab, setActiveTab] = useState<ProjectTab>('reports')
   const [gameflowView, setGameflowView] = useState<'beats' | 'table' | 'cards' | 'map' | 'user' | 'script'>('table')
   const [generatingGameFlow, setGeneratingGameFlow] = useState(false)
   const [gameFlowElapsed, setGameFlowElapsed] = useState(0)
@@ -268,12 +277,12 @@ export function ProjectPage() {
 
   const PAGE_HISTORY_MAX = 10
 
-  function getWorkspaceHistoryKey(tab: 'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop') {
+  function getWorkspaceHistoryKey(tab: ProjectTab) {
     if (!project || !activeVersion) return null
     return `xynaps_workspace_hist_${project.id}_${activeVersion.id}_${tab}`
   }
 
-  function loadWorkspaceHistory(tab: 'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop') {
+  function loadWorkspaceHistory(tab: ProjectTab) {
     const key = getWorkspaceHistoryKey(tab)
     if (!key) return []
     try {
@@ -284,7 +293,7 @@ export function ProjectPage() {
     }
   }
 
-  function saveWorkspaceHistory(tab: 'setup' | 'draft' | 'reports' | 'gameflow' | 'studio' | 'workshop', history: Array<{ id: string; savedAt: string; payload: unknown }>) {
+  function saveWorkspaceHistory(tab: ProjectTab, history: Array<{ id: string; savedAt: string; payload: unknown }>) {
     const key = getWorkspaceHistoryKey(tab)
     if (!key) return
     safeSetItem(key, JSON.stringify(history))
@@ -294,6 +303,7 @@ export function ProjectPage() {
     // 리로드 전에 미저장 게임플로우 편집을 먼저 저장해, 아래 storage 재읽기가
     // 최신 편집을 덮어쓰지 않도록 한다 (Supabase 동기화 pull 시 유실 방지).
     flushGameFlowSave()
+    flushStoryNoteSave()
     const p = getProjects().find(p => p.id === id)
     if (!p) { navigate('/'); return }
     setProject(p)
@@ -306,11 +316,12 @@ export function ProjectPage() {
 
   // 미저장 게임플로우 편집 플러시: 페이지 이탈(언마운트)·탭 종료 시 debounce 대기분 저장
   useEffect(() => {
-    const onBeforeUnload = () => flushGameFlowSave()
+    const onBeforeUnload = () => { flushGameFlowSave(); flushStoryNoteSave() }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload)
       flushGameFlowSave()
+      flushStoryNoteSave()
     }
   }, [])
 
@@ -563,7 +574,9 @@ export function ProjectPage() {
         project.theme,
         project.crimeConfig,
         resolvedReports,
-        project.attachments
+        project.attachments,
+        undefined,
+        project.storyNote,
       )
       updateVersionGameFlow(project.id, activeVersion.id, sheet)
       setGameFlowSyncedAt(new Date().toISOString())
@@ -608,6 +621,54 @@ export function ProjectPage() {
     gameFlowSaveRef.current = { timer, pid, vid, sheet }
   }
 
+  // ── 스토리 노트 (기본 정보 > 스토리 노트) ──
+  // 게임플로우와 같은 이유로 in-memory 즉시 반영 + 실제 저장은 debounce.
+  function flushStoryNoteSave() {
+    const pending = storyNoteSaveRef.current
+    if (!pending) return
+    if (pending.timer !== null) clearTimeout(pending.timer)
+    storyNoteSaveRef.current = null
+    updateProjectStoryNote(pending.pid, pending.note)
+  }
+
+  function handleStoryNoteChange(note: StoryNote) {
+    if (!project) return
+    const pid = project.id
+    setProject(prev => prev && { ...prev, storyNote: note, updatedAt: new Date().toISOString() })
+    const existing = storyNoteSaveRef.current
+    if (existing?.timer != null) clearTimeout(existing.timer)
+    const timer = window.setTimeout(() => {
+      const p = storyNoteSaveRef.current
+      storyNoteSaveRef.current = null
+      if (p) updateProjectStoryNote(p.pid, p.note)
+    }, 600)
+    storyNoteSaveRef.current = { timer, pid, note }
+  }
+
+  function generateStoryNote() {
+    if (!project) return
+    requireConfirm('story-note', () => _doGenerateStoryNote())
+  }
+  async function _doGenerateStoryNote() {
+    if (!project) return
+    setGeneratingStoryNote(true)
+    setStoryNoteError(null)
+    try {
+      const current = syncStoryNoteWithCrime(normalizeStoryNote(project.storyNote), project.crimeConfig)
+      const draft = await generateStoryNoteDraft(project.name, project.theme, project.crimeConfig, current)
+      const merged = mergeStoryNoteDraft(current, draft)
+      setProject(prev => prev && { ...prev, storyNote: merged, updatedAt: new Date().toISOString() })
+      const pending = storyNoteSaveRef.current
+      if (pending?.timer != null) clearTimeout(pending.timer)
+      storyNoteSaveRef.current = null
+      updateProjectStoryNote(project.id, merged)
+    } catch (e) {
+      setStoryNoteError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setGeneratingStoryNote(false)
+    }
+  }
+
   function handleStoryBeatsChange(sheet: StoryBeatsSheet) {
     if (!project || !activeVersion) return
     updateVersionStoryBeats(project.id, activeVersion.id, sheet)
@@ -632,7 +693,8 @@ export function ProjectPage() {
         project.theme,
         project.crimeConfig,
         resolvedReports,
-        project.attachments
+        project.attachments,
+        project.storyNote,
       )
       updateVersionStoryBeats(project.id, activeVersion.id, sheet)
       setGameflowView('beats')
@@ -658,7 +720,8 @@ export function ProjectPage() {
         project.theme,
         project.crimeConfig,
         activeVersion.storyBeats,
-        activeVersion.gameFlow
+        activeVersion.gameFlow,
+        project.storyNote,
       )
       updateVersionGameFlow(project.id, activeVersion.id, sheet)
       setGameFlowSyncedAt(new Date().toISOString())
@@ -802,11 +865,25 @@ export function ProjectPage() {
   const finalDetailSplit = displayFinalClean ? splitReportDetail(displayFinalClean.detail ?? '') : null
   const hasCompletedReports = (activeVersion?.agentReports?.length ?? 0) > 0
   // '기본 정보' 상단 탭은 기본정보/초안/보고서 서브탭을 묶는 그룹이다.
-  const isInfoActive = activeTab === 'setup' || activeTab === 'draft' || activeTab === 'reports'
+  const isInfoActive = activeTab === 'setup' || activeTab === 'draft' || activeTab === 'storynote' || activeTab === 'reports'
   const showSetupView = !running && activeTab === 'setup' && hasCompletedReports
-  const showDraftView = !running && (
+  // 드래프트 상태(보고서 없음)에서는 초안 ↔ 스토리 노트 두 화면만 토글한다
+  const isDraftStage = !running && !hasCompletedReports && activeVersion?.status === 'draft'
+  const showStoryNoteView = !running && activeTab === 'storynote' && (hasCompletedReports || isDraftStage)
+  const showDraftView = !running && !showStoryNoteView && (
     activeVersion?.status === 'draft' ||
     (activeTab === 'draft' && hasCompletedReports)
+  )
+  // 아직 노트가 없는 프로젝트는 백과사전의 인물·공간·관계를 빈 시트로 미리 깔아 보여준다 (편집 전까지 저장하지 않음)
+  // useMemo: 편집 전 상태에서 렌더마다 새 id 가 생겨 카드가 리마운트되는 것을 막는다
+  const projectStoryNote = project?.storyNote
+  const projectCrimeConfig = project?.crimeConfig
+  const storyNoteForView = useMemo(
+    () => project
+      ? (projectStoryNote ? normalizeStoryNote(projectStoryNote) : syncStoryNoteWithCrime(normalizeStoryNote(undefined), projectCrimeConfig))
+      : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectStoryNote, projectCrimeConfig, project?.id],
   )
   const isReadonlyDraftView = activeVersion?.status !== 'draft'
   const completedReportCount = displayReports.filter(r => r.status === 'done').length
@@ -1309,13 +1386,14 @@ export function ProjectPage() {
             {[
               { key: 'setup', label: '기본 정보' },
               { key: 'draft', label: '초안' },
+              { key: 'storynote', label: '스토리 노트' },
               { key: 'reports', label: '보고서' },
             ].map(sub => {
               const active = activeTab === sub.key
               return (
                 <button
                   key={sub.key}
-                  onClick={() => setActiveTab(sub.key as 'setup' | 'draft' | 'reports')}
+                  onClick={() => setActiveTab(sub.key as ProjectTab)}
                   style={{
                     padding: '6px 14px', borderRadius: 999,
                     border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
@@ -1414,6 +1492,92 @@ export function ProjectPage() {
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>저장된 수사 백과사전 정보가 없습니다.</div>
               )}
             </div>
+
+            <div style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              borderRadius: 16,
+              padding: '16px 18px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>스토리 노트</div>
+                <button
+                  onClick={() => setActiveTab('storynote')}
+                  style={{
+                    padding: '5px 12px', borderRadius: 999, border: '1px solid var(--accent)',
+                    background: 'var(--accent-dim)', color: 'var(--accent)', fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  {storyNoteForView && !isStoryNoteEmpty(storyNoteForView) ? '열어서 편집' : '작성 시작'}
+                </button>
+              </div>
+              {storyNoteForView && !isStoryNoteEmpty(storyNoteForView) ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {[
+                    { label: '로그라인', value: storyNoteForView.compass.logline || '-' },
+                    { label: '핵심 갈등', value: storyNoteForView.compass.coreConflict || '-' },
+                    { label: '인물 코어시트', value: `${storyNoteForView.characterSheets.length}명` },
+                    { label: '공간 설정 노트', value: `${storyNoteForView.spaceNotes.length}개` },
+                    { label: '방(회차) 네비게이션', value: `${storyNoteForView.roomNav.length}구간 · 셀프체크 완료 ${storyNoteForView.roomNav.filter(r => r.checkPacing && r.checkCharacter && r.checkPlausibility).length}` },
+                    { label: '복선 트래커', value: `설치 ${storyNoteForView.foreshadows.filter(f => f.content.trim()).length} · 회수 ${storyNoteForView.foreshadows.filter(f => f.status === '회수' && f.content.trim()).length} · 미회수 ${storyNoteForView.foreshadows.filter(f => f.status === '미회수' && f.content.trim()).length}` },
+                  ].map(item => (
+                    <div key={item.label} style={{
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      padding: '12px 13px',
+                    }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>{item.label}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 700, lineHeight: 1.6 }}>{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>아직 작성된 스토리 노트가 없습니다. 나침반(로그라인·핵심 갈등)부터 채우면 에이전트 결과물의 방향이 잡힙니다.</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 드래프트 단계: 초안 ↔ 스토리 노트 토글 (아직 상단 탭이 없을 때) */}
+        {isDraftStage && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+            {[
+              { key: 'draft', label: '초안' },
+              { key: 'storynote', label: '스토리 노트' },
+            ].map(sub => {
+              const active = sub.key === 'storynote' ? activeTab === 'storynote' : activeTab !== 'storynote'
+              return (
+                <button
+                  key={sub.key}
+                  onClick={() => setActiveTab(sub.key as ProjectTab)}
+                  style={{
+                    padding: '6px 14px', borderRadius: 999,
+                    border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: active ? 'var(--accent-dim)' : 'var(--bg-card)',
+                    color: active ? 'var(--accent)' : 'var(--text-muted)',
+                    fontSize: 12.5, fontWeight: active ? 700 : 500,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {sub.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* 스토리 노트 — 소설 작업노트 응용 (나침반·원칙·인물·공간·관계선·줄거리·네비게이션·복선) */}
+        {showStoryNoteView && storyNoteForView && (
+          <div style={{ marginBottom: 24 }}>
+            <StoryNotePanel
+              note={storyNoteForView}
+              crime={project.crimeConfig}
+              onChange={handleStoryNoteChange}
+              onGenerateDraft={generateStoryNote}
+              generating={generatingStoryNote}
+              generateError={storyNoteError}
+            />
           </div>
         )}
 

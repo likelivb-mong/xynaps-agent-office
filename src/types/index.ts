@@ -98,6 +98,7 @@ export interface Project {
   briefings?: Partial<Record<AgentId, BriefingData>>
   meetingMinutes?: MeetingMinutes[]
   collaborationStatus?: CollaborationStatus
+  storyNote?: StoryNote   // 스토리 작업노트 (기본 정보 > 스토리 노트)
   createdAt: string
   updatedAt: string
   versions: ProjectVersion[]
@@ -334,4 +335,98 @@ export interface ChatMessage {
   content: string
   agentId?: AgentId
   createdAt: string
+}
+
+// ── 스토리 작업노트 (소설 작업노트 → 방탈출 스토리 설계 응용) ────────────────
+// 프로젝트 단위로 1개. 에이전트 프롬프트 컨텍스트에도 함께 주입된다.
+export type StoryEndingType = '감' | '정' | '위' | '대'  // 감정적 감동 · 정보의 폭발 · 위기 발생 · 대치
+export type ForeshadowStatus = '설치' | '회수' | '미회수' | '폐기'
+
+export interface StoryCompass {
+  logline: string        // 이 한 줄만 보고도 테마 전체가 떠올라야 한다
+  coreConflict: string   // 인물이 진짜 싸우고 있는 것
+  differentiator: string // 다른 테마와 다른 단 하나의 지점
+  genreTone: string      // 장르·분위기·플레이 후 남아야 할 뒷맛
+  freeNotes: string      // 그래도 감이 안 잡히면 — 형식 없이 아무거나
+}
+export interface StoryPrinciple {
+  id: string
+  title: string
+  description: string
+  checkQuestion: string  // 막힐 때 스스로 던지는 질문
+  note: string           // 이 프로젝트에서의 구체적 적용 메모
+}
+export interface CharacterSimulation {
+  id: string
+  situation: string
+  reaction: string
+}
+export interface CharacterCoreSheet {
+  id: string
+  characterId?: string   // crimeConfig.characters 와 연결 (있으면)
+  name: string
+  identity: string       // 한 줄 정체성
+  lack: string           // 결핍 — 이 인물이 진짜로 원하는 것
+  lie: string            // 거짓말 — 자신 또는 세상에게 하고 있는 거짓말 (알리바이·은폐 포함)
+  neverDoes: string      // 절대 하지 않을 행동
+  mannerisms: string     // 말투·습관의 특징 (음성·메모·단서 톤에 반영)
+  simulations: CharacterSimulation[]  // 상황 → 행동 시뮬레이션
+}
+export interface SpaceNote {
+  id: string
+  roomName: string
+  purpose: string        // 이 공간의 기능 — 왜 이 공간이 필요한가
+  duality: string        // 이중성·대비 — 겉보기와 실제, 조명 전/후
+  sensoryDetail: string  // 감각적 디테일 — 보이는 것·들리는 것·냄새·온도
+  keyEvents: string      // 이 공간이 아니면 일어날 수 없는 핵심 사건·퍼즐
+}
+export interface RelationArc {
+  id: string
+  relationId?: string    // crimeConfig.relations 와 연결 (있으면)
+  fromName: string
+  toName: string
+  closenessStart: number // 0(멀어짐) ~ 4(가까움)
+  closenessMid: number
+  closenessEnd: number
+  howShown: string       // 이 변화를 어떤 장면(단서·연출)으로 보여줄 것인가
+}
+export interface PlotPart {
+  stage: StoryStageKey   // 기 / 승 / 전 / 반전 / 결 = 1~5부
+  title: string
+  goal: string           // 목표
+  turningPoint: string   // 전환점
+  climax: string         // 클라이맥스
+}
+export interface RoomNavEntry {
+  id: string
+  label: string          // 방 이름 또는 구간 이름 (회차에 해당)
+  event: string          // 사건 — 이 방에서 벌어지는 일
+  emotion: string        // 이번 방의 감정
+  playerFeels: string    // 플레이어가 느낄 것
+  nextHook: string       // 다음 방 훅
+  nextTeaser: string     // 다음 방 예고
+  endingType?: StoryEndingType
+  checkPacing: boolean       // 강약조절
+  checkCharacter: boolean    // 캐릭터 일관성
+  checkPlausibility: boolean // 서사 개연성
+}
+export interface ForeshadowItem {
+  id: string
+  content: string
+  plantedAt: string      // 설치 위치 (방/스텝)
+  payoffAt: string       // 회수 위치 (방/스텝)
+  status: ForeshadowStatus
+  memo: string
+}
+export interface StoryNote {
+  compass: StoryCompass
+  principles: StoryPrinciple[]
+  characterSheets: CharacterCoreSheet[]
+  spaceNotes: SpaceNote[]
+  relationArcs: RelationArc[]
+  plotParts: PlotPart[]
+  roomNav: RoomNavEntry[]
+  foreshadows: ForeshadowItem[]
+  updatedAt: string
+  generatedAt?: string   // AI 초안 생성 시각
 }

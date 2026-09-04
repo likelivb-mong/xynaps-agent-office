@@ -23,6 +23,10 @@ const ACTION_LABELS: Record<CostActionType, { title: string; desc: string }> = {
     title: '에이전트 재실행',
     desc: '이 에이전트만 다시 실행합니다. 기존 보고서가 교체됩니다.',
   },
+  'story-note': {
+    title: '스토리 노트 초안 생성',
+    desc: '테마와 수사 백과사전을 바탕으로 작업노트의 빈 칸을 AI가 채웁니다. 직접 쓴 내용은 유지됩니다.',
+  },
 }
 
 function getTierLabel() {
