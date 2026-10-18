@@ -24,6 +24,14 @@ export default async function handler(req: Request): Promise<Response> {
     })
   }
 
+  // 보관 모드에서는 AI 생성을 막아 공개 주소로 API 비용이 새지 않게 한다.
+  if (process.env.VITE_ARCHIVE_MODE !== 'false') {
+    return new Response(
+      JSON.stringify({ error: { message: '보관 모드(보기 전용)에서는 AI 생성이 꺼져 있습니다.' } }),
+      { status: 410, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
+    )
+  }
+
   const apiKey = process.env.VITE_ANTHROPIC_API_KEY
   if (!apiKey || apiKey === 'your_api_key_here') {
     return new Response(

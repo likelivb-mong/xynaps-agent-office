@@ -5,6 +5,7 @@ import { BRANCH_CODES } from '../data/questData'
 import { AgentCard } from '../components/agents/AgentCard'
 import { CommonSkillCard } from '../components/agents/CommonSkillCard'
 import { getProjects, duplicateProject, getAllSkills, getCommonSkills, saveProject, getTrashedProjects, moveProjectToTrash, restoreProjectFromTrash, permanentlyDeleteProjectFromTrash, syncProjectsFromSupabase, syncSkillsFromSupabase } from '../lib/storage'
+import { isArchiveMode } from '../lib/supabase'
 import type { Project, SkillFile, AgentId, BranchCode } from '../types'
 import { CopyIcon, TrashIcon, WorkflowIcon, WriteIcon, CloseIcon, RefreshIcon } from '../components/ui/Icon'
 import { useAuth } from '../contexts/AuthContext'
@@ -262,14 +263,14 @@ export function HomePage() {
                   저장된 방탈출 테마 기획 프로젝트
                 </p>
               </div>
-              <button onClick={() => navigate('/new-project')} style={{
+              {!isArchiveMode && <button onClick={() => navigate('/new-project')} style={{
                 padding: '7px 16px', borderRadius: 8, border: 'none',
                 background: 'var(--accent)', color: 'var(--accent-fg)',
                 fontSize: 12, fontWeight: 700, cursor: 'pointer',
                 letterSpacing: '0.01em', flexShrink: 0,
               }}>
                 + 새 프로젝트
-              </button>
+              </button>}
             </div>
             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
