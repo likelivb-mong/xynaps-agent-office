@@ -1,11 +1,17 @@
 import type { Project, ProjectVersion, AgentReport, FinalReport, SkillFile, AgentId, BranchCode, CrimeConfig, GameFlowSheet, GameSystemType, ChatMessage, CollaborationStatus, WorkshopSession, MeetingMinutes } from '../types'
-import { supabase } from './supabase'
+import { supabase, isArchiveMode } from './supabase'
 import { safeGetItem, safeSetItem } from './storageCompression'
 
 const PROJECTS_KEY = 'xynaps_v2_projects'
 const PROJECTS_TRASH_KEY = 'xynaps_v2_projects_trash'
 const SKILLS_KEY = 'xynaps_v2_skills'
 const COMMON_SKILLS_KEY = 'xynaps_v2_common_skills'
+
+// 보관 모드에서는 프로젝트·스킬 데이터를 덮어쓰지 않는다 (보기 전용).
+function persist(key: string, value: string): void {
+  if (isArchiveMode) return
+  safeSetItem(key, value)
+}
 
 // ── 전역 저장 상태 (피그마 스타일 인디케이터용) ───────────────────────────────
 export type SaveStatus =
@@ -127,11 +133,11 @@ export async function syncSkillsFromSupabase(): Promise<void> {
     const newFromRemote = remoteList.filter(s => !localIds.has(s.id))
     mergedSkills[agentId] = [...localList, ...newFromRemote]
   }
-  safeSetItem(SKILLS_KEY, JSON.stringify(mergedSkills))
+  persist(SKILLS_KEY, JSON.stringify(mergedSkills))
 
   const localCommonIds = new Set(localCommon.map(s => s.id))
   const newCommon = commonList.filter(s => !localCommonIds.has(s.id))
-  safeSetItem(COMMON_SKILLS_KEY, JSON.stringify([...localCommon, ...newCommon]))
+  persist(COMMON_SKILLS_KEY, JSON.stringify([...localCommon, ...newCommon]))
 
   // 로컬에만 있는 스킬 Supabase에 업로드
   const remoteSkillIds = new Set(data.map((r: { id: string }) => r.id))
@@ -181,7 +187,7 @@ export async function syncProjectsFromSupabase(): Promise<void> {
   const sortedActive = Array.from(mergedActive.values()).sort(
     (a, b) => b.createdAt.localeCompare(a.createdAt)
   )
-  safeSetItem(PROJECTS_KEY, JSON.stringify(sortedActive))
+  persist(PROJECTS_KEY, JSON.stringify(sortedActive))
 
   // 휴지통 머지: 다른 기기에서 복원한 ID는 제외
   const mergedTrash = new Map<string, TrashedProject>()
@@ -193,7 +199,7 @@ export async function syncProjectsFromSupabase(): Promise<void> {
   const sortedTrash = Array.from(mergedTrash.values()).sort(
     (a, b) => b.deletedAt.localeCompare(a.deletedAt)
   )
-  safeSetItem(PROJECTS_TRASH_KEY, JSON.stringify(sortedTrash))
+  persist(PROJECTS_TRASH_KEY, JSON.stringify(sortedTrash))
 
   // 로컬에만 있는 항목들 Supabase 업로드 (휴지통 포함)
   const remoteIds = new Set(allRemote.map(p => p.id))
@@ -221,11 +227,11 @@ export function saveProject(project: Project): void {
   const idx = projects.findIndex(p => p.id === project.id)
   if (idx >= 0) projects[idx] = project
   else projects.unshift(project)
-  safeSetItem(PROJECTS_KEY, JSON.stringify(projects))
+  persist(PROJECTS_KEY, JSON.stringify(projects))
   // 백그라운드로 Supabase 동기화 (상태는 sbUpsertProject 내부에서 emit)
   if (supabase) {
     sbUpsertProject(project)
-  } else {
+  } else if (!isArchiveMode) {
     // Supabase 미설정 시 localStorage 쓰기는 즉시 완료
     emitSaveStatus({ state: 'saved', at: Date.now() })
   }
@@ -241,7 +247,7 @@ export function getTrashedProjects(): TrashedProject[] {
 }
 
 function saveTrashedProjects(projects: TrashedProject[]): void {
-  safeSetItem(PROJECTS_TRASH_KEY, JSON.stringify(projects))
+  persist(PROJECTS_TRASH_KEY, JSON.stringify(projects))
 }
 
 export function moveProjectToTrash(projectId: string): void {
@@ -249,7 +255,7 @@ export function moveProjectToTrash(projectId: string): void {
   const target = projects.find(p => p.id === projectId)
   if (!target) return
   const nextProjects = projects.filter(p => p.id !== projectId)
-  safeSetItem(PROJECTS_KEY, JSON.stringify(nextProjects))
+  persist(PROJECTS_KEY, JSON.stringify(nextProjects))
 
   const trashed: TrashedProject = { ...target, deletedAt: new Date().toISOString() }
   const trash = getTrashedProjects().filter(p => p.id !== projectId)
@@ -417,7 +423,7 @@ export function clearStaleCollaborationStatuses(): void {
     }
   }
   if (changed) {
-    safeSetItem(PROJECTS_KEY, JSON.stringify(projects))
+    persist(PROJECTS_KEY, JSON.stringify(projects))
   }
 }
 
@@ -544,7 +550,7 @@ export function setAgentReportActiveVersion(
 
 export function deleteProject(projectId: string): void {
   const projects = getProjects().filter(p => p.id !== projectId)
-  safeSetItem(PROJECTS_KEY, JSON.stringify(projects))
+  persist(PROJECTS_KEY, JSON.stringify(projects))
   sbDeleteProject(projectId)
 }
 
@@ -563,7 +569,7 @@ export function saveAgentSkill(agentId: AgentId, skill: SkillFile): void {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { base64, url, ...meta } = skill
     all[agentId].push(meta)
-    safeSetItem(SKILLS_KEY, JSON.stringify(all))
+    persist(SKILLS_KEY, JSON.stringify(all))
     sbUpsertSkill(agentId, skill)
   } catch (e) { console.error(e) }
 }
@@ -572,7 +578,7 @@ export function removeAgentSkill(agentId: AgentId, skillId: string): void {
   try {
     const all = JSON.parse(safeGetItem(SKILLS_KEY) || '{}')
     if (all[agentId]) all[agentId] = all[agentId].filter((s: SkillFile) => s.id !== skillId)
-    safeSetItem(SKILLS_KEY, JSON.stringify(all))
+    persist(SKILLS_KEY, JSON.stringify(all))
     sbDeleteSkill(skillId)
   } catch (e) { console.error(e) }
 }
@@ -649,14 +655,14 @@ export function saveCommonSkill(skill: SkillFile): void {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { base64, url, ...meta } = skill
     all.push(meta)
-    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(all))
+    persist(COMMON_SKILLS_KEY, JSON.stringify(all))
     sbUpsertSkill('common', skill)
   } catch (e) { console.error(e) }
 }
 
 export function removeCommonSkill(skillId: string): void {
   try {
-    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(
+    persist(COMMON_SKILLS_KEY, JSON.stringify(
       getCommonSkills().filter(s => s.id !== skillId)
     ))
     sbDeleteSkill(skillId)
@@ -668,7 +674,7 @@ export function updateCommonSkillKnowledge(skillId: string, summary: string): vo
     const skills = getCommonSkills()
     const idx = skills.findIndex(s => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], knowledgeSummary: summary }
-    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(skills))
+    persist(COMMON_SKILLS_KEY, JSON.stringify(skills))
   } catch (e) { console.error(e) }
 }
 
@@ -677,7 +683,7 @@ export function patchCommonSkill(skillId: string, updates: Partial<import('../ty
     const skills = getCommonSkills()
     const idx = skills.findIndex(s => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], ...updates }
-    safeSetItem(COMMON_SKILLS_KEY, JSON.stringify(skills))
+    persist(COMMON_SKILLS_KEY, JSON.stringify(skills))
   } catch (e) { console.error(e) }
 }
 
@@ -688,7 +694,7 @@ export function patchAgentSkill(agentId: AgentId, skillId: string, updates: Part
     const idx = skills.findIndex(s => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], ...updates }
     all[agentId] = skills
-    safeSetItem(SKILLS_KEY, JSON.stringify(all))
+    persist(SKILLS_KEY, JSON.stringify(all))
   } catch (e) { console.error(e) }
 }
 
@@ -699,7 +705,7 @@ export function updateSkillKnowledge(agentId: AgentId, skillId: string, summary:
     const idx = skills.findIndex((s: SkillFile) => s.id === skillId)
     if (idx >= 0) skills[idx] = { ...skills[idx], knowledgeSummary: summary }
     all[agentId] = skills
-    safeSetItem(SKILLS_KEY, JSON.stringify(all))
+    persist(SKILLS_KEY, JSON.stringify(all))
   } catch (e) { console.error(e) }
 }
 
@@ -725,4 +731,39 @@ export function saveWorkshopSession(projectId: string, versionId: string, sessio
   else version.workshopSessions.push(session)
   project.updatedAt = new Date().toISOString()
   saveProject(project)
+}
+
+// ── 백업 (보관 모드용) ─────────────────────────────────────────────────────────
+// 이 브라우저에 저장된 xynaps 데이터 전체를 파일 하나로 내려받고, 다른 기기에서 다시 불러온다.
+
+const BACKUP_KEY_PREFIX = 'xynaps'
+
+export type BackupFile = {
+  app: 'xynaps-agent-office'
+  exportedAt: string
+  items: Record<string, string>
+}
+
+export function exportBackup(): BackupFile {
+  const items: Record<string, string> = {}
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key?.startsWith(BACKUP_KEY_PREFIX)) continue
+    const value = safeGetItem(key)
+    if (value !== null) items[key] = value
+  }
+  return { app: 'xynaps-agent-office', exportedAt: new Date().toISOString(), items }
+}
+
+/** 백업 파일을 이 브라우저에 덮어쓴다. 불러온 프로젝트 수를 반환. */
+export function importBackup(raw: string): number {
+  const backup = JSON.parse(raw) as Partial<BackupFile>
+  if (backup.app !== 'xynaps-agent-office' || !backup.items || typeof backup.items !== 'object') {
+    throw new Error('XYNAPS 백업 파일이 아닙니다.')
+  }
+  const entries = Object.entries(backup.items).filter(
+    ([key, value]) => key.startsWith(BACKUP_KEY_PREFIX) && typeof value === 'string',
+  )
+  for (const [key, value] of entries) safeSetItem(key, value)
+  return getProjects().length
 }

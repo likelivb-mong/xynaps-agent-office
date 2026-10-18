@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useSettings, type ModelQuality } from '../contexts/SettingsContext'
+import { exportBackup, importBackup, getProjects } from '../lib/storage'
+import { isArchiveMode } from '../lib/supabase'
 
 const QUALITIES: ModelQuality[] = ['절약', '균형', '최고']
 
@@ -91,6 +93,64 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   )
 }
 
+function BackupSection() {
+  const [message, setMessage] = useState<string | null>(null)
+  const projectCount = getProjects().length
+
+  function download() {
+    const backup = exportBackup()
+    const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `xynaps-agent-office-backup-${backup.exportedAt.slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  async function upload(file: File) {
+    if (!window.confirm('이 브라우저에 있는 데이터를 백업 파일 내용으로 덮어씁니다. 계속할까요?')) return
+    try {
+      const count = importBackup(await file.text())
+      setMessage(`프로젝트 ${count}개를 불러왔습니다.`)
+    } catch (e) {
+      setMessage(`불러오기 실패: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const buttonStyle = {
+    padding: '8px 14px', borderRadius: 8, border: '1px solid #2f3447',
+    background: 'transparent', color: '#e2e8f0', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  } as const
+
+  return (
+    <div style={{ border: '1px solid rgba(245,158,11,0.4)', borderRadius: 14, padding: 18, marginBottom: 32 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>보관 모드 · 데이터 백업</div>
+      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7, marginBottom: 12 }}>
+        지금 사이트는 보기 전용입니다. 데이터는 서버가 아니라 이 브라우저에만 저장돼 있습니다
+        (현재 프로젝트 {projectCount}개). 백업 파일을 내려받아 보관하고, 다른 기기나 브라우저에서는
+        그 파일을 불러오면 같은 내용을 볼 수 있습니다.
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={download} style={buttonStyle}>백업 파일 내려받기</button>
+        <label style={buttonStyle}>
+          백업 파일 불러오기
+          <input
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) upload(file)
+              e.target.value = ''
+            }}
+          />
+        </label>
+      </div>
+      {message && <div style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10 }}>{message}</div>}
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { settings, updateSettings } = useSettings()
   const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'disconnected'>('disconnected')
@@ -129,6 +189,8 @@ export function SettingsPage() {
       </header>
 
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '40px 24px' }}>
+
+        {isArchiveMode && <BackupSection />}
 
         {/* Section label */}
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: '#64748b', marginBottom: 16 }}>
